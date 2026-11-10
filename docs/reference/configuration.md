@@ -185,6 +185,8 @@ Types are `s` for string, `x` for hex cells, `i` for decimal cells, `u` for unsi
 | `tool` | string | ADT generator path |
 | `chip_id` | string | Chip ID for the ADT |
 | `owned_memory_size` | string | Contiguous window request |
+| `owned_memory_excluded_ranges` | integer | Size of the excluded-range table; the window may then span more than one run of free memory. Only for an OS profile whose XNU reads the table |
+| `loader_inputs` | boolean | Reserve the records in which DarwinBoot reports where the payload RAM disk and the initrd buffer lie |
 | `root_match_volume_uuid` | string | Root volume UUID |
 | `cpu_regs` | string | CPU MPIDR values, comma separated |
 | `psci_method` | string | `smc` or `hvc` |
@@ -206,6 +208,7 @@ Runtime inputs prepared before the kernel build. The Data seed's volume UUID is 
 | `skip_setup` | boolean | Mark Setup as done in a new Data seed |
 | `data_seed_tool` | string | Seed script that runs as root. A missing seed stops the build with the command to run |
 | `gpu_addon` | boolean | Build the GPU addon (default `true`). With `false`, the trust bundle holds the original caches only |
+| `boot_shims` | boolean | Add the owner `apfs_boot_util` to the addon, for macOS with `apfs-boot-shim=1` |
 | `trust_components` | array | IPSW trust cache components bundled for the owner trust cache |
 | `wallpapers`, `audio_tool`, `wifi_tool`, `bluetooth_tool`, `appsync` | | Optional userspace layers added to the addon |
 
