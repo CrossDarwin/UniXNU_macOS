@@ -147,6 +147,24 @@ jobs:
       - name: Prepare verified Wi-Fi firmware
         run: python3 scripts/ci/wifi_firmware.py --device ../device
 
+      - name: Fetch and verify Wi-Fi source dependencies
+        env:
+          # The lock lists files as well as directories; Git cone mode rejects these patterns.
+          GIT_CONFIG_COUNT: '1'
+          GIT_CONFIG_KEY_0: core.sparseCheckoutCone
+          GIT_CONFIG_VALUE_0: 'false'
+        run: |
+          PYTHONPATH=scripts python3 - <<'PY'
+          import os, sys
+          from pathlib import Path
+          from unixnu.build_output import run_logged
+          tool = '../device/drivers/Ath12kWifi/tools/fetch-sources.py'
+          for stage, options in [('fetch', []), ('check', ['--check'])]:
+              result = run_logged([sys.executable, tool, *options],
+                                  log_file=Path(os.environ['WORK']) / 'logs' / f'wifi-sources-{stage}.log')
+              result.check_returncode()
+          PY
+
       - name: Prepare signed root tables and Data
         env:
           INIT_DATA: ${{ inputs.init_data }}

@@ -12,6 +12,7 @@ ROOT = Path(__file__).resolve().parents[2]
 WORK = Path('UniXNU/out/sheng/macos-27.3-26C5035r/sheng_macos/tree')
 SOURCE_PATHS = [Path('UniXNU/out/feeds'), Path('device/.cache/firmware')]
 SOURCE_PATHS += [Path('device/firmware/wcn7850') / name for name in ('amss.bin', 'm3.bin', 'board-2.bin', 'Notice.txt')]
+SOURCE_PATHS += [Path('device/drivers/Ath12kWifi/deps')]
 SOURCE_PATHS += [WORK / '.cache' / name for name in ('mesa-work', 'gpu-reference', 'mesa-venv', 'mesa-tools')]
 BUILD_PATHS = [WORK / 'build', WORK / '.cache/fakeroot', WORK / '.cache/xnu-work']
 LIMITS = {'sources': 1024 * 2**20, 'build': 2048 * 2**20}
@@ -25,7 +26,8 @@ def identity(device, uefi):
     source = {'version': 1, 'workspace': str(ROOT.parent), 'python': sys.version,
               'feeds': (ROOT / 'feeds.toml').read_text(), 'modules': (ROOT / '.gitmodules').read_text(),
               'os': (ROOT / 'profiles/os/macos-27.3-26C5035r/profile.toml').read_text(),
-              'device_feeds': (device / 'feeds.toml').read_text(), 'device_board': (device / 'board.toml').read_text()}
+              'device_feeds': (device / 'feeds.toml').read_text(), 'device_board': (device / 'board.toml').read_text(),
+              'wifi_module': run('git', '-C', device, 'ls-tree', 'HEAD', 'drivers/Ath12kWifi')}
     compiled = {**source, 'core': run('git', 'ls-files', '-s'),
                 'device': run('git', '-C', device, 'ls-files', '-s'), 'uefi': run('git', '-C', uefi, 'rev-parse', 'HEAD'),
                 'xcode': run('xcodebuild', '-version'), 'clang': run('xcrun', 'clang', '--version'),

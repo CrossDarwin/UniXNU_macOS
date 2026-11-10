@@ -58,6 +58,23 @@ class CacheTests(unittest.TestCase):
             self.assertEqual((firmware / 'amss.bin').read_bytes(), b'firmware')
             self.assertEqual((firmware / 'Notice.txt').read_text(), 'vendor notice')
 
+    def test_wifi_dependencies_restore_without_replacing_module_sources(self):
+        with tempfile.TemporaryDirectory() as directory:
+            base = Path(directory)
+            module = base / 'device/drivers/Ath12kWifi'
+            dependency = module / 'deps/linux/include/net/mac80211.h'
+            dependency.parent.mkdir(parents=True)
+            dependency.write_text('locked source')
+            lock = module / 'source-lock.json'
+            lock.write_text('old lock')
+            archive = base / 'cache.tar.zst'
+            self.assertTrue(cache.pack('sources', base, archive))
+            shutil.rmtree(module / 'deps')
+            lock.write_text('current tracked lock')
+            cache.unpack(archive, base)
+            self.assertEqual(dependency.read_text(), 'locked source')
+            self.assertEqual(lock.read_text(), 'current tracked lock')
+
 
 if __name__ == '__main__':
     unittest.main()
