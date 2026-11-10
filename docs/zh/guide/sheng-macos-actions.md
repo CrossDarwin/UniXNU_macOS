@@ -11,6 +11,10 @@
 在 `sheng/macos-actions` 分支手动运行工作流。首次安装且没有缓存的 Data 种子时，
 勾选 `init_data`。后续构建复用种子。推送提交不触发构建。
 
+准备系统镜像前，工作流从[固定版本的 linux-firmware](https://kernel.googlesource.com/pub/scm/linux/kernel/git/firmware/linux-firmware.git/+/69e51bb26f3fa3e118dd770f1962a93bed690dc1/ath12k/WCN7850/hw2.0/)
+下载 WCN7850 固件，按设备的 `firmware/wcn7850/manifest.json` 校验长度和 SHA-256。
+已校验的文件通过源码缓存复用。测试包保留 `WCN7850-Notice.txt`。
+
 工作流通过 VerifiedRoot 校验原始根镜像的每个块，生成签名策略，再构建内核、
 固件与 payload。userdata 包含 OS、SystemOS、App 镜像窗口、策略哈希表，
 以及清零的持久化存储与日志空间。

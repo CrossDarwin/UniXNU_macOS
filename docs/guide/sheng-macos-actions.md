@@ -13,6 +13,12 @@ Manually run the workflow on `sheng/macos-actions`. Select `init_data` for a fir
 installation when no cached Data seed exists. Later builds reuse the seed.
 Pushing commits does not start a build.
 
+Before preparing OS images, the workflow downloads WCN7850 firmware from
+[linux-firmware at a pinned revision](https://kernel.googlesource.com/pub/scm/linux/kernel/git/firmware/linux-firmware.git/+/69e51bb26f3fa3e118dd770f1962a93bed690dc1/ath12k/WCN7850/hw2.0/).
+File sizes and SHA-256 hashes must match the device's `firmware/wcn7850/manifest.json`.
+Verified files are reused from the source cache. The test package includes
+`WCN7850-Notice.txt`.
+
 The workflow verifies every original root block with VerifiedRoot, generates
 the signed policy handoff and builds the kernel, firmware and payload. The
 userdata image includes the OS, SystemOS and App windows, policy hash tables,
