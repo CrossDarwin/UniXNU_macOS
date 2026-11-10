@@ -37,6 +37,7 @@ env:
 
 jobs:
   package:
+    if: github.event_name != 'push' || github.event.created
     runs-on: xcode-27
     timeout-minutes: 360
     steps:
@@ -49,7 +50,18 @@ jobs:
           repository: UniXNU/UniXNU-sheng
           ref: 89a9686ee45cf66ad6f873d6d6180bda966892c1
           path: device
-          submodules: recursive
+      - name: Select device dependencies
+        run: |
+          python3 - <<'PY'
+          import subprocess, tomllib
+          from pathlib import Path
+          board = tomllib.loads(Path('../device/board.toml').read_text())
+          included = board['os_overrides']['macos-27.3-26C5035r']['components']['include']
+          if 'QcomDwc3' in included:
+              raise SystemExit('QcomDwc3 must have an available pinned revision before enabling it')
+          # This profile does not select the device USB module; its upstream gitlink is unavailable.
+          subprocess.run(['git', '-C', '../device', 'config', 'submodule.drivers/QcomDwc3.update', 'none'], check=True)
+          PY
       - uses: actions/checkout@v4
         with:
           repository: UniXNU/uefi-sheng
