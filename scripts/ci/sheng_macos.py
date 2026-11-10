@@ -10,6 +10,7 @@ import importlib.util
 import json
 import os
 from pathlib import Path
+import shlex
 import shutil
 import struct
 import subprocess
@@ -128,10 +129,52 @@ def save_json(path: Path, value) -> None:
     path.write_text(json.dumps(value, indent=2) + '\n')
 
 
+def check_build_inputs(ctx) -> None:
+    from unixnu import feeds
+    from unixnu.kernel import archive_plan
+    from unixnu.payload import check_args
+    if ctx.schema_version == 2:
+        feeds.resolve(ctx)
+    paths = []
+    runtime = ctx.board['payload']['runtime']
+    for key in ('tool', 'data_seed_tool'):
+        if runtime.get(key):
+            paths.append(ctx.tree / runtime[key])
+    for key in ('audio_tool', 'wifi_tool', 'bluetooth_tool'):
+        if runtime.get(key):
+            paths.append(ctx.device / runtime[key])
+    for kind, entry in archive_plan(ctx):
+        if kind == 'component':
+            module = ctx.modules[(entry['kind'], entry['id'])]
+            fields = {'tree': str(ctx.tree), 'component': str(module.path), 'out': str(ctx.work)}
+            command = [part.format(**fields) for part in entry['build']]
+        else:
+            command = shlex.split(entry)
+        script = Path(command[0])
+        if script.suffix in ('.py', '.sh'):
+            paths.append(script if script.is_absolute() else ctx.tree / 'scripts' / script)
+    for entry in ctx.board['firmware'].get('preflight', []):
+        paths.append(ctx.tree / shlex.split(entry)[0])
+    uefi = Path(ctx.args.uefi)
+    paths.extend(uefi / path for path in ('BootShim/BootShim.S', 'Resources/Scripts/mkbootimg.py',
+                 ctx.board['firmware']['dsc'], f'Resources/Configs/{ctx.board["firmware"]["config"]}.toml'))
+    missing = [str(path) for path in paths if not path.is_file()]
+    require(not missing, 'Missing build inputs before image preparation:\n' + '\n'.join(missing))
+    line = check_args(ctx.board['payload']['kernel_args'])
+    require(len(line) < 1000, 'Kernel command line must be shorter than 1000 bytes for release verification')
+    print(f'Build inputs checked: {len(paths)} scripts and firmware files; kernel arguments {len(line)} bytes', flush=True)
+
+
 def prepare_inputs(ctx, init_data: bool) -> None:
     from unixnu import userdata
     from unixnu.ipsw import Ipsw
     from unixnu.util import sha256_file
+    check_build_inputs(ctx)
+    seed = ctx.work / 'runtime/data.dbr'
+    prior = seed.with_name('ci-seed.json')
+    require(seed.is_file() or init_data, 'No preserved Data seed; enable init_data only for a new installation')
+    if seed.is_file() and prior.is_file():
+        require(json.loads(prior.read_text())['sha256'] == sha256_file(seed), 'Preserved Data seed has changed')
     source = Ipsw(ctx)
     spec = ctx.board['userdata']
     partition = (spec['last_lba'] - spec['first_lba'] + 1) * spec['lba_bytes']

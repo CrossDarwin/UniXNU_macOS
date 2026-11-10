@@ -8,10 +8,58 @@ import subprocess
 import tempfile
 import unittest
 import uuid
+from types import SimpleNamespace
+from unittest.mock import patch
 
 spec = importlib.util.spec_from_file_location('sheng_macos_ci', Path(__file__).with_name('sheng_macos.py'))
 ci = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(ci)
+
+
+class BuildInputTests(unittest.TestCase):
+    def context(self, root):
+        tree, device, uefi = (root / name for name in ('tree', 'device', 'uefi'))
+        board = {'kernel': {'archives': ['build-one.py']},
+                 'payload': {'kernel_args': ['-v'], 'runtime': {'tool': 'scripts/runtime.py',
+                             'data_seed_tool': 'scripts/seed.py', 'wifi_tool': 'scripts/wifi.py'}},
+                 'firmware': {'preflight': ['scripts/preflight.py --check'], 'config': 'sheng', 'dsc': 'sheng.dsc'}}
+        for base, names in [(tree, ['scripts/build-one.py', 'scripts/runtime.py', 'scripts/seed.py', 'scripts/preflight.py']),
+                            (device, ['scripts/wifi.py']),
+                            (uefi, ['BootShim/BootShim.S', 'Resources/Scripts/mkbootimg.py',
+                                    'Resources/Configs/sheng.toml', 'sheng.dsc'])]:
+            for name in names:
+                path = base / name
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text('input')
+        return SimpleNamespace(tree=tree, device=device, args=SimpleNamespace(uefi=uefi),
+                               schema_version=1, board=board, work=root / 'work')
+
+    def test_missing_runtime_input_fails_before_image_access(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            ctx = self.context(Path(temporary))
+            ci.check_build_inputs(ctx)
+            (ctx.device / 'scripts/wifi.py').unlink()
+            with patch('unixnu.ipsw.Ipsw', side_effect=AssertionError('must fail before image access')):
+                with self.assertRaisesRegex(ValueError, 'scripts/wifi.py'):
+                    ci.prepare_inputs(ctx, False)
+
+    def test_seed_cache_miss_fails_before_image_access(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            ctx = self.context(Path(temporary))
+            with patch('unixnu.ipsw.Ipsw', side_effect=AssertionError('must fail before image access')):
+                with self.assertRaisesRegex(ValueError, 'No preserved Data seed'):
+                    ci.prepare_inputs(ctx, False)
+
+    def test_corrupt_seed_fails_before_image_access(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            ctx = self.context(Path(temporary))
+            runtime = ctx.work / 'runtime'
+            runtime.mkdir(parents=True)
+            (runtime / 'data.dbr').write_bytes(b'corrupted')
+            (runtime / 'ci-seed.json').write_text('{"sha256": "wrong"}')
+            with patch('unixnu.ipsw.Ipsw', side_effect=AssertionError('must fail before image access')):
+                with self.assertRaisesRegex(ValueError, 'Data seed has changed'):
+                    ci.prepare_inputs(ctx, False)
 
 
 class PolicyTests(unittest.TestCase):

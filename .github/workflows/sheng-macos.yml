@@ -92,8 +92,9 @@ jobs:
             echo /opt/homebrew/opt/lld/bin
             echo /opt/homebrew/opt/bison/bin
           } >> "$GITHUB_PATH"
+          export PATH="$HOME/.cargo/bin:/opt/homebrew/opt/llvm/bin:/opt/homebrew/opt/lld/bin:/opt/homebrew/opt/bison/bin:$PATH"
           rustup toolchain install 1.98.0 --profile minimal --component rust-src
-          for tool in python3 clang xcodebuild make git ninja cmake dtc fdtget fdtput aea compression_tool mformat mcopy ipsw; do
+          for tool in python3 clang xcodebuild xcrun make git ninja cmake dtc fdtget fdtput aea compression_tool mformat mcopy ipsw zstd tar split shasum llvm-objcopy llvm-nm ld.lld rustup; do
             command -v "$tool" >/dev/null
           done
 
