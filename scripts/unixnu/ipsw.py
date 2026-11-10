@@ -75,9 +75,9 @@ class RangeFile(io.RawIOBase):
 
     def __init__(self, url, block=CHUNK, retries=4, workers=None):
         self.url, self.block, self.retries = url, block, retries
-        self.workers = int(os.environ.get('UNIXNU_IPSW_WORKERS', '4')) if workers is None else workers
-        if not 1 <= self.workers <= 8 or block <= 0 or retries <= 0:
-            raise Error('IPSW workers must be 1..8; block size and retries must be positive')
+        self.workers = int(os.environ.get('UNIXNU_IPSW_WORKERS', '64')) if workers is None else workers
+        if not 1 <= self.workers <= 64 or block <= 0 or retries <= 0:
+            raise Error('IPSW workers must be 1..64; block size and retries must be positive')
         self.prefetch_end = 0
         self.stats_lock = threading.Lock()
         self.position = 0

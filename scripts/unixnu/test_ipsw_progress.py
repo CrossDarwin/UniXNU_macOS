@@ -59,7 +59,9 @@ class TransferTests(unittest.TestCase):
         self.fail_once = set()
         self.wrong_offset = False
         self.etag = 'release-1'
-        self.server = ThreadingHTTPServer(('127.0.0.1', 0), Handler)
+        class Server(ThreadingHTTPServer):
+            request_queue_size = 128
+        self.server = Server(('127.0.0.1', 0), Handler)
         self.thread = threading.Thread(target=self.server.serve_forever, daemon=True)
         self.thread.start()
         self.temp = tempfile.TemporaryDirectory()
@@ -115,6 +117,19 @@ class TransferTests(unittest.TestCase):
         self.assertEqual(sorted(self.gets), [(0, 0)] + [(i*1024, i*1024+1023) for i in range(4,12)])
         self.assertFalse(any(t.name.startswith('ipsw-range') for t in threading.enumerate()))
 
+    def test_maximum_64_connections_preserves_order_and_bounds(self):
+        self.body = bytes(range(256)) * 512
+        self.delay = 0.1
+        with RangeFile(self.url, block=1024, workers=64) as source:
+            source.seek(4096)
+            with source.prefetch(64*1024):
+                self.assertEqual(source.read(64*1024), self.body[4096:4096+64*1024])
+            self.assertLessEqual(len(source.cache), 64)
+        self.assertGreater(self.maximum, 8)
+        self.assertLessEqual(self.maximum, 64)
+        self.assertEqual(sorted(self.gets), [(0,0)] + [(i*1024,i*1024+1023) for i in range(4,68)])
+        self.assertFalse(any(t.name.startswith('ipsw-range') for t in threading.enumerate()))
+
     def test_parallel_download_reuses_validated_cache_after_restart(self):
         self.body = bytes(range(256)) * 64
         environment = {'UNIXNU_IPSW_RANGE_CACHE': self.temp.name, 'UNIXNU_IPSW_CACHE_MIB': '1'}
@@ -164,7 +179,7 @@ class TransferTests(unittest.TestCase):
                 self.assertLess(stream.downloaded, len(self.body))
 
     def test_worker_limit_is_validated_before_network_access(self):
-        for workers in (0,9):
+        for workers in (0,65):
             with self.assertRaisesRegex(Exception, 'workers'):
                 RangeFile(self.url, workers=workers)
 
