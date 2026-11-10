@@ -9,9 +9,9 @@ device and UEFI repositories in the workflow.
 Set the repository Actions secret `UNIXNU_UNIQUE_CHIP_ID` to the installation's
 eight-digit hexadecimal platform seed. Keep that value for later builds.
 
-Run the workflow on `sheng/macos-actions`. Select `init_data` for a first
+Manually run the workflow on `sheng/macos-actions`. Select `init_data` for a first
 installation when no cached Data seed exists. Later builds reuse the seed.
-The initial branch push also permits first-install seed creation.
+Pushing commits does not start a build.
 
 The workflow verifies every original root block with VerifiedRoot, generates
 the signed policy handoff and builds the kernel, firmware and payload. The
@@ -37,3 +37,24 @@ sparse image for the entire 249497890816-byte userdata partition. Flashing it
 erases Android user data. Verify the connected device and partition size before
 flashing. `test-package.json` records the source revisions and image geometry;
 a successful build does not mark hardware testing complete.
+
+## Progress and reuse
+
+IPSW extraction reports bytes, percentage, average speed and estimated remaining
+time every ten seconds. A quiet transfer reports how long it has received no new
+data. Failed HTTP requests report retries and backoff.
+
+Later runs reuse up to 5 GiB of downloaded HTTP ranges, a source archive up to
+1 GiB and a compiler-output archive up to 2 GiB. Data seeds keep their separate
+installation cache. Root image ranges require a matching URL, size and HTTP
+validator; cached blocks are hashed before use. The first downloaded ranges are
+retained when the budget fills, so sequential reads do not evict the data needed
+by the next run. Data beyond the budget is downloaded again.
+
+Source revisions select the source cache. Compiler outputs additionally require
+matching tracked inputs, workspace, Python, Xcode, SDK, LLVM and Rust versions.
+Oversized archives are skipped. Download caches are saved after failed runs too;
+no installation seed is regenerated on a cache miss without `init_data`.
+
+These caches take effect on the next manual run and are populated by that run.
+They do not change a workflow already running.
