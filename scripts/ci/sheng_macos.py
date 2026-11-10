@@ -160,6 +160,9 @@ def check_build_inputs(ctx) -> None:
                  ctx.board['firmware']['dsc'], f'Resources/Configs/{ctx.board["firmware"]["config"]}.toml'))
     missing = [str(path) for path in paths if not path.is_file()]
     require(not missing, 'Missing build inputs before image preparation:\n' + '\n'.join(missing))
+    if ctx.schema_version == 2:
+        from sheng_sources import check
+        check(ctx)
     line = check_args(ctx.board['payload']['kernel_args'])
     require(len(line) < 1000, 'Kernel command line must be shorter than 1000 bytes for release verification')
     print(f'Build inputs checked: {len(paths)} scripts and firmware files; kernel arguments {len(line)} bytes', flush=True)
@@ -287,6 +290,9 @@ def collect(ctx, destination: Path) -> None:
     revisions = {}
     for name, path in [('unixnu', ROOT), ('device', ctx.device), ('uefi', ctx.args.uefi)]:
         revisions[name] = subprocess.check_output(['git', '-C', str(path), 'rev-parse', 'HEAD'], text=True).strip()
+    revisions['soc'] = ctx.soc.commit
+    revisions['usb'] = subprocess.check_output(
+        ['git', '-C', str(ctx.device / 'drivers/QcomDwc3'), 'rev-parse', 'HEAD'], text=True).strip()
     report = {'device': 'sheng', 'os_profile': PROFILE, 'revisions': revisions,
               'userdata_bytes': inputs['partition_bytes'], 'data_bytes': inputs['data_bytes'],
               'log_reserve_bytes': inputs['log_reserve_bytes'], 'policies': inputs['verified_policies'],

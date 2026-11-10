@@ -49,17 +49,12 @@ jobs:
           ref: 89a9686ee45cf66ad6f873d6d6180bda966892c1
           path: device
       - name: Select device dependencies
-        run: |
-          python3 - <<'PY'
-          import subprocess, tomllib
-          from pathlib import Path
-          board = tomllib.loads(Path('../device/board.toml').read_text())
-          included = board['os_overrides']['macos-27.3-26C5035r']['components']['include']
-          if 'QcomDwc3' in included:
-              raise SystemExit('QcomDwc3 must have an available pinned revision before enabling it')
-          # This profile does not select the device USB module; its upstream gitlink is unavailable.
-          subprocess.run(['git', '-C', '../device', 'config', 'submodule.drivers/QcomDwc3.update', 'none'], check=True)
-          PY
+        run: python3 scripts/ci/sheng_sources.py --device ../device
+      - uses: actions/checkout@v4
+        with:
+          repository: UniXNU/QcomDwc3
+          ref: e4efe95c903a737e0f5955e5b50a8fb4d2a7d718
+          path: device/drivers/QcomDwc3
       - uses: actions/checkout@v4
         with:
           repository: UniXNU/uefi-sheng
@@ -162,6 +157,9 @@ jobs:
                               log_file=Path(os.environ['WORK']) / 'logs/wifi-sources-fetch.log')
           result.check_returncode()
           PY
+
+      - name: Prepare verified Bluetooth sources
+        run: python3 ../device/drivers/QcaBluetooth/tools/prepare-linux.py
 
       - name: Prepare signed root tables and Data
         env:

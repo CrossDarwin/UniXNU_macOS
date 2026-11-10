@@ -13,6 +13,42 @@ spec.loader.exec_module(cache)
 
 @unittest.skipUnless(shutil.which('zstd'), 'zstd is required for cache archives')
 class CacheTests(unittest.TestCase):
+    def test_source_overrides_and_usb_revision_invalidate_caches(self):
+        with tempfile.TemporaryDirectory() as directory:
+            device = Path(directory)
+            (device / 'feeds.toml').write_text('feeds')
+            (device / 'board.toml').write_text('board')
+            with patch.object(cache, 'run', return_value='pinned'):
+                original = cache.identity(device, device)
+                (device / 'local.toml').write_text('new SoC pin')
+                changed = cache.identity(device, device)
+                self.assertNotEqual(original['sources'], changed['sources'])
+                self.assertNotEqual(original['build'], changed['build'])
+            def revision(*args, **kwargs):
+                return 'new USB pin' if 'rev-parse' in args and str(args[2]).endswith('drivers/QcomDwc3') else 'pinned'
+            with patch.object(cache, 'run', side_effect=revision):
+                usb_changed = cache.identity(device, device)
+            self.assertNotEqual(changed['sources'], usb_changed['sources'])
+            self.assertNotEqual(changed['build'], usb_changed['build'])
+
+    def test_bluetooth_cache_excludes_tracked_sources_and_lock(self):
+        with tempfile.TemporaryDirectory() as directory:
+            base = Path(directory)
+            module = base / 'device/drivers/QcaBluetooth'
+            source = module / 'out/linux/btqca.c'
+            source.parent.mkdir(parents=True)
+            source.write_text('verified Linux source')
+            lock = module / 'tools/source-lock.json'
+            lock.parent.mkdir()
+            lock.write_text('old lock')
+            archive = base / 'cache.tar.zst'
+            self.assertTrue(cache.pack('sources', base, archive))
+            shutil.rmtree(module / 'out')
+            lock.write_text('current tracked lock')
+            cache.unpack(archive, base)
+            self.assertEqual(source.read_text(), 'verified Linux source')
+            self.assertEqual(lock.read_text(), 'current tracked lock')
+
     def test_archive_restores_objects_but_excludes_signing_keys(self):
         with tempfile.TemporaryDirectory() as directory:
             base = Path(directory)
