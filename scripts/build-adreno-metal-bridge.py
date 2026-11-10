@@ -74,7 +74,21 @@ PATCHES = [ROOT / 'drivers/AdrenoMetal/bridge/patches' / name for name in [
     '0029-latency-stage-selection.patch',
     # Spare image blocks have no byte limit (they age, go when a block cannot be made and on memory pressure), and the room keeper takes
     # a spare block before it makes a new one: the limit freed spares the render server made again within seconds, each a fresh wiring.
-    '0030-spare-image-blocks-give-room.patch']]
+    '0030-spare-image-blocks-give-room.patch',
+    # Live blocks by kind and size class and the driver's commitment of lazily allocated ones, for the MK and ML rows.
+    '0031-memory-kinds-by-size.patch',
+    # A cache hit stops refreshing access times after the platform refuses it once.
+    '0032-shader-cache-touch-refused-once.patch',
+    # The room thread's timed spare aging runs inside an exit-guard section.
+    '0033-room-thread-ages-spares-in-a-section.patch',
+    # Parked objects and kept empty blocks go by time, so a discarded volatile resource's block is returned without a later submission.
+    '0034-parked-objects-and-kept-blocks-age-by-time.patch',
+    # A two-plane YCbCr surface texture that is only sampled is made over the surface's planes alone, its converted image only at a
+    # binding that needs one.
+    '0035-ycbcr-surface-textures-over-their-planes.patch',
+    # A read-only system cache layer a device asks for what its own cache directory lacks, read only where every level is owned by a
+    # trusted user and not writable by group or others; and a cache directory whose entries everyone may read, for the process that fills it.
+    '0036-system-shader-cache-layer.patch']]
 
 
 def git_tree(*steps):
