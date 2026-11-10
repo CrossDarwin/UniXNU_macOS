@@ -11,6 +11,7 @@ import sys
 ROOT = Path(__file__).resolve().parents[2]
 WORK = Path('UniXNU/out/sheng/macos-27.3-26C5035r/sheng_macos/tree')
 SOURCE_PATHS = [Path('UniXNU/out/feeds'), Path('device/.cache/firmware')]
+SOURCE_PATHS += [Path('device/firmware/wcn7850') / name for name in ('amss.bin', 'm3.bin', 'board-2.bin', 'Notice.txt')]
 SOURCE_PATHS += [WORK / '.cache' / name for name in ('mesa-work', 'gpu-reference', 'mesa-venv', 'mesa-tools')]
 BUILD_PATHS = [WORK / 'build', WORK / '.cache/fakeroot', WORK / '.cache/xnu-work']
 LIMITS = {'sources': 1024 * 2**20, 'build': 2048 * 2**20}

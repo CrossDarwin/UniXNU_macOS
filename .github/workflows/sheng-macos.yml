@@ -144,6 +144,9 @@ jobs:
           ./unixnu fetch --device ../device --os "$PROFILE"
           ./unixnu tree --device ../device --os "$PROFILE"
 
+      - name: Prepare verified Wi-Fi firmware
+        run: python3 scripts/ci/wifi_firmware.py --device ../device
+
       - name: Prepare signed root tables and Data
         env:
           INIT_DATA: ${{ inputs.init_data }}

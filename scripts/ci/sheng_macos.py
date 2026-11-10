@@ -236,7 +236,8 @@ def collect(ctx, destination: Path) -> None:
     files = {'boot.img': ctx.work / 'boot/boot.img', 'payload.img': ctx.work / 'payload/payload.img',
              'kernel.macho': ctx.work / 'kernel/kernel.macho', 'package.manifest.json': ctx.work / 'package.manifest.json',
              'userdata-root.json': rootdir / 'userdata-root.json', 'data.dbr': ctx.work / 'runtime/data.dbr',
-             'data-inputs.json': ctx.work / 'runtime/inputs.json'}
+             'data-inputs.json': ctx.work / 'runtime/inputs.json',
+             'WCN7850-Notice.txt': ctx.device / 'firmware/wcn7850/Notice.txt'}
     for name, path in files.items():
         require(path.is_file(), f'Missing build product: {path}')
         shutil.copy2(path, destination / name)

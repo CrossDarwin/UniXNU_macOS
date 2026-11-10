@@ -40,6 +40,24 @@ class CacheTests(unittest.TestCase):
                 self.assertFalse(cache.pack('sources', base, archive))
             self.assertFalse(archive.exists())
 
+    def test_firmware_cache_cannot_replace_the_tracked_manifest(self):
+        with tempfile.TemporaryDirectory() as directory:
+            base = Path(directory)
+            firmware = base / 'device/firmware/wcn7850'
+            firmware.mkdir(parents=True)
+            manifest = firmware / 'manifest.json'
+            manifest.write_text('old manifest')
+            (firmware / 'amss.bin').write_bytes(b'firmware')
+            (firmware / 'Notice.txt').write_text('vendor notice')
+            archive = base / 'cache.tar.zst'
+            self.assertTrue(cache.pack('sources', base, archive))
+            manifest.write_text('new tracked manifest')
+            (firmware / 'amss.bin').unlink()
+            cache.unpack(archive, base)
+            self.assertEqual(manifest.read_text(), 'new tracked manifest')
+            self.assertEqual((firmware / 'amss.bin').read_bytes(), b'firmware')
+            self.assertEqual((firmware / 'Notice.txt').read_text(), 'vendor notice')
+
 
 if __name__ == '__main__':
     unittest.main()
