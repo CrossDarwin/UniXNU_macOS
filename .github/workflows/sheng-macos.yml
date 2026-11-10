@@ -26,6 +26,8 @@ env:
   HOMEBREW_NO_INSTALL_CLEANUP: '1'
   HOMEBREW_NO_ENV_HINTS: '1'
   PYTHONUNBUFFERED: '1'
+  UNIXNU_BUILD_PROGRESS: '1'
+  NINJA_STATUS: '[%f/%t %p - %es] '
   UNIXNU_IPSW_RANGE_CACHE: ${{ github.workspace }}/UniXNU/out/ipsw-ranges
   UNIXNU_IPSW_CACHE_MIB: '2048'
   UNIXNU_PRUNE_AEA: '1'
@@ -74,7 +76,7 @@ jobs:
           xcodebuild -version
           xcrun --sdk iphoneos --show-sdk-version
           python3 -m unittest discover -s scripts/ci -p 'test_*.py' -v
-          PYTHONPATH=scripts python3 -m unittest unixnu.test_ipsw_progress unixnu.test_userdata_report -v
+          PYTHONPATH=scripts python3 -m unittest unixnu.test_ipsw_progress unixnu.test_userdata_report unixnu.test_build_output -v
           df -h .
 
       - name: Prepare runner disk capacity

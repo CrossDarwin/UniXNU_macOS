@@ -45,7 +45,7 @@ def lzfse():
 
 
 def run(command, *, cwd=None, env=None, log_file=None, capture=False):
-    """Run a command, echoing it. With log_file the output goes there and the tail is shown on failure."""
+    """Run a command, echoing it. With log_file, retain full output and optionally mirror it for CI."""
     command = [str(part) for part in command]
     if not capture:
         print('+ ' + ' '.join(command), flush=True)
@@ -55,12 +55,12 @@ def run(command, *, cwd=None, env=None, log_file=None, capture=False):
             raise Error(f'{command[0]} failed ({result.returncode}): {result.stderr.strip() or result.stdout.strip()}')
         return result.stdout
     if log_file:
-        Path(log_file).parent.mkdir(parents=True, exist_ok=True)
-        with Path(log_file).open('w') as stream:
-            result = subprocess.run(command, cwd=cwd, env=env, stdout=stream, stderr=subprocess.STDOUT)
+        from .build_output import enabled, run_logged
+        result = run_logged(command, cwd=cwd, env=env, log_file=log_file)
         if result.returncode:
-            tail = Path(log_file).read_text(errors='replace').splitlines()[-30:]
-            print('\n'.join(tail), file=sys.stderr)
+            if not enabled(env):
+                tail = Path(log_file).read_text(errors='replace').splitlines()[-30:]
+                print('\n'.join(tail), file=sys.stderr)
             raise Error(f'{command[0]} failed ({result.returncode}); full log: {log_file}')
         return ''
     result = subprocess.run(command, cwd=cwd, env=env)

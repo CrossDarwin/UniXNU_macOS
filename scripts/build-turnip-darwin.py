@@ -13,6 +13,7 @@ import shutil
 import subprocess
 import sys
 from mesa_patch_identity import validate_recorded_patches
+from unixnu.build_output import run_logged
 
 ROOT = Path(__file__).resolve().parents[1]
 parser = argparse.ArgumentParser(description=__doc__)
@@ -104,17 +105,15 @@ build_id = hashlib.sha256(json.dumps(dict(mesa_revision=pins['mesa']['commit'], 
                                           extra_sources=source_extras), sort_keys=True).encode()).hexdigest()[:40]
 options += ['-Dtu-build-id=' + build_id]
 log = LOGS / ('mesa-tu-%s-configure.log' % args.target)
-with log.open('w') as stream:
-    # An existing build directory takes the current options (meson configure), so an option added here reaches it.
-    command = setup + options if not (OUT / 'build.ninja').exists() else [ROOT / '.cache/mesa-venv/bin/meson', 'configure', OUT] + options
-    if subprocess.run([str(c) for c in command], env=env, stdout=stream, stderr=subprocess.STDOUT).returncode:
-        sys.exit('Configure failed; see ' + str(log) + '\n' + '\n'.join(log.read_text().splitlines()[-12:]))
+# Reconfigure an existing build directory so current options reach cached outputs.
+command = setup + options if not (OUT / 'build.ninja').exists() else [ROOT / '.cache/mesa-venv/bin/meson', 'configure', OUT] + options
+if run_logged([str(c) for c in command], env=env, log_file=log).returncode:
+    sys.exit('Configure failed; see ' + str(log) + '\n' + '\n'.join(log.read_text().splitlines()[-12:]))
 if args.configure_only:
     print('PASS: Turnip darwin-kmd configuration (%s)' % args.target)
     sys.exit(0)
 build_log = LOGS / ('mesa-tu-%s-build.log' % args.target)
-with build_log.open('w') as stream:
-    result = subprocess.run(['ninja', '-C', str(OUT), '-j6'], env=env, stdout=stream, stderr=subprocess.STDOUT)
+result = run_logged(['ninja', '-C', str(OUT), '-j6'], env=env, log_file=build_log)
 if result.returncode:
     sys.exit('Build failed; see ' + str(build_log) + '\n' + '\n'.join(
         l for l in build_log.read_text().splitlines() if ': error:' in l or 'fatal error:' in l or l.startswith('FAILED:'))[:3000])

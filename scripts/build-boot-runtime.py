@@ -12,6 +12,7 @@ import os
 from pathlib import Path
 import plistlib
 import re
+import shlex
 import shutil
 import struct
 import subprocess
@@ -22,9 +23,17 @@ import zlib
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / 'scripts'))
 from mesa_patch_identity import validate_recorded_patches
+from unixnu.build_output import enabled
+
+
+def status(message):
+    if enabled():
+        print('== runtime - ' + message, flush=True)
 
 
 def run(*command, **kwargs):
+    if enabled():
+        print('+ ' + shlex.join(str(part) for part in command), flush=True)
     subprocess.run([str(part) for part in command], check=True, **kwargs)
 
 
@@ -36,6 +45,7 @@ def script(name, *args, **kwargs):
 def os_mount(image, work):
     # A developer may already have this exact OS mounted for inspection. Reuse
     # only a read-only attachment, and leave its lifetime with its owner.
+    status('locating read-only OS mount')
     info = plistlib.loads(subprocess.check_output(['hdiutil', 'info', '-plist']))
     for entry in info.get('images', []):
         if Path(entry.get('image-path', '')).resolve() != Path(image).resolve():
@@ -49,6 +59,7 @@ def os_mount(image, work):
             return
     mount = work / 'os-mount'
     mount.mkdir()
+    status('attaching OS image read-only')
     attached = plistlib.loads(subprocess.check_output(['hdiutil', 'attach', '-readonly', '-nobrowse',
                                                        '-mountpoint', str(mount), '-plist', str(image)]))
     device = attached['system-entities'][0]['dev-entry']
@@ -72,12 +83,14 @@ def checkout(path, pin):
 
 
 def build_plugin(target):
+    status('preparing GPU sources and plugins for ' + target)
     pins = json.loads((ROOT / 'scripts/data/adreno-compiler-inputs.json').read_text())
     mesa = ROOT / '.cache/mesa-work'
     fresh = checkout(mesa, pins['mesa'])
     if fresh:
         for patch in pins['patches']:
             run('git', '-C', mesa, 'apply', ROOT / patch)
+    status('validating Mesa source patches')
     validate_recorded_patches(ROOT, mesa, pins)
     translator = json.loads((ROOT / 'scripts/data/gpu-metal-vulkan-inputs.json').read_text())['translator']
     checkout(ROOT / '.cache/gpu-reference/metal2vulkan', translator)
@@ -232,6 +245,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--request', type=Path, required=True)
     request = json.loads(parser.parse_args().request.read_text())
+    status('preparing ' + request.get('target', 'selected target'))
     out = Path(request['output'])
     seed = Path(request['data_ramdisk'])
     addon = Path(request['gpu_addon']) if request.get('gpu_addon') else None
