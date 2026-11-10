@@ -67,6 +67,11 @@ Changes of at least 3 dB publish link updates. SNR is floored at zero.
 | `log-gpu=0 log-display=0` | Skip GPU/display diagnostic collection |
 | Automatic reset | Disabled in the current temporary image |
 
+## Source preparation
+
+The source lock includes individual files and directories. The fetcher uses
+non-cone sparse checkout and preserves imported-source modification checks.
+
 ## Verification
 
 From Ath12kWifi, run the checks affected by a change:
