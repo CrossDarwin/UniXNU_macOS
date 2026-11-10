@@ -59,6 +59,14 @@ no installation seed is regenerated on a cache miss without `init_data`.
 These caches take effect on the next manual run and are populated by that run.
 They do not change a workflow already running.
 
+Runtime, kernel and firmware subprocess output is mirrored live. Mesa configuration
+and compilation logs are mirrored too. Ninja shows completed and total tasks,
+percentage and elapsed time. Runtime preparation prints each executed command.
+
+After ten seconds without output, the log name, elapsed and quiet times, log size
+and free disk space are reported. A quiet notice means the subprocess has not
+exited; it does not establish progress or a hang. Raw logs remain on disk.
+
 ## Disk space
 
 The workflow removes unused Xcode installations and simulators while preserving
