@@ -255,6 +255,12 @@ The image must match `[ipsw]`: product, version, build, device class, chip ID an
 
 ### kernel
 
+GitHub source downloads reuse local files and verify their pinned hashes. Missing XNU
+header lists come from Git trees. Adreno firmware comes from a fixed raw-file revision.
+HTTP rate limits and transient failures report retries; limited raw-file requests fall
+back to the same Git revision. Auxiliary API requests use `GITHUB_TOKEN`, `GH_TOKEN`,
+or the local `gh` login. Downloaded Git objects and source metadata remain cached.
+
 The kernel step:
 
 1. Resolves the declared patch series and component patches, then applies them to target-local XNU sources. Format 1 uses its directory patch order.

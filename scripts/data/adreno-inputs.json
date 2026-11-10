@@ -120,7 +120,8 @@
         "git_blob_sha1": "e2ee80d3af1b174fd32c1ff5c169aa9598fba0bd",
         "sha256": "4fd56fefa82c82a677b6ce09f24368cba47ed1b110d38860196787fb85cc17b4"
       }
-    }
+    },
+    "revision": "053da477a5c338ac28d7c1c869e8c3ff7ca24d11"
   },
   "board": {
     "repository": "https://github.com/ianchb/sm8550-mainline",

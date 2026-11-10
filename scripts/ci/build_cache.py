@@ -14,7 +14,9 @@ SOURCE_PATHS = [Path('UniXNU/out/feeds'), Path('device/.cache/firmware')]
 SOURCE_PATHS += [Path('device/firmware/wcn7850') / name for name in ('amss.bin', 'm3.bin', 'board-2.bin', 'Notice.txt')]
 SOURCE_PATHS += [Path('device/drivers/Ath12kWifi/deps')]
 SOURCE_PATHS += [Path('device/drivers/QcaBluetooth/out/linux')]
-SOURCE_PATHS += [WORK / '.cache' / name for name in ('mesa-work', 'gpu-reference', 'mesa-venv', 'mesa-tools')]
+SOURCE_PATHS += [WORK / '.cache' / name for name in ('mesa-work', 'gpu-reference', 'mesa-venv', 'mesa-tools',
+                                                  'github-sources', 'sources', 'adreno-source', 'softfloat-source',
+                                                  'appsync-signer/sources')]
 BUILD_PATHS = [WORK / 'build', WORK / '.cache/fakeroot', WORK / '.cache/xnu-work']
 LIMITS = {'sources': 1024 * 2**20, 'build': 2048 * 2**20}
 

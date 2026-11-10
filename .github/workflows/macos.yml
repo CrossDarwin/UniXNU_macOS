@@ -187,10 +187,10 @@ jobs:
           trust_cache_url=$(jq -r '.inputs.trust_cache_url // ""' "$GITHUB_EVENT_PATH")
           data_seed_url=$(jq -r '.inputs.data_seed_url // ""' "$GITHUB_EVENT_PATH")
           if [ -n "$trust_cache_url" ]; then
-            curl -fsSL --retry 3 "$trust_cache_url" -o "$RUNNER_TEMP/trustcache"
+            curl -fsSL --retry 3 --retry-all-errors --retry-delay 2 --retry-max-time 300 --max-time 600 "$trust_cache_url" -o "$RUNNER_TEMP/trustcache"
           fi
           if [ -n "$data_seed_url" ]; then
-            curl -fsSL --retry 3 "$data_seed_url" -o "$RUNNER_TEMP/data.dbr"
+            curl -fsSL --retry 3 --retry-all-errors --retry-delay 2 --retry-max-time 300 --max-time 600 "$data_seed_url" -o "$RUNNER_TEMP/data.dbr"
             if [ -n "$GROW_GIB" ]; then
               # seed-data-grow.py imports drivers/DarwinBoot/Test and keeps its scratch image in build/.
               git submodule update --init --depth 1 drivers/DarwinBoot
@@ -211,8 +211,7 @@ jobs:
       - name: Build kernel
         id: kernel
         env:
-          # prepare-xnu-source.py lists Apple sources through the GitHub API; anonymous calls from hosted runners hit
-          # the shared rate limit (HTTP 403).
+          # Auxiliary API downloads use the job token; pinned source reads use Git and raw files.
           GITHUB_TOKEN: ${{ github.token }}
         run: ./unixnu build kernel
 

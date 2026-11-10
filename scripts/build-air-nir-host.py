@@ -8,7 +8,7 @@ import os
 from pathlib import Path
 import random
 import re
-import urllib.request
+from github_download import atomic_write, fetch_bytes
 import shutil
 import struct
 import subprocess
@@ -54,8 +54,10 @@ for name, expected in reference['files'].items():
     if not path.exists():
         path.parent.mkdir(parents=True, exist_ok=True)
         url = reference['repository'].replace('github.com', 'raw.githubusercontent.com') + '/' + reference['commit'] + '/' + name
-        with urllib.request.urlopen(url, timeout=20) as stream:
-            path.write_bytes(stream.read(1024 * 1024))
+        data = fetch_bytes(url, timeout=20, max_bytes=1024 * 1024)
+        if hashlib.sha256(data).hexdigest() != expected:
+            raise RuntimeError('Pinned SoftFloat algorithm reference differs: ' + name)
+        atomic_write(path, data)
     if sha(path) != expected:
         raise RuntimeError('Pinned SoftFloat algorithm reference differs: ' + name)
 if sha(KIT / 'licenses/SoftFloat-3e.txt') != reference['files']['COPYING.txt']:

@@ -9,7 +9,7 @@ import subprocess
 import sys
 import tomllib
 from urllib.parse import quote
-from urllib.request import urlopen
+from github_download import fetch_bytes
 
 ROOT = Path(__file__).resolve().parents[1]
 AREAS = {
@@ -209,8 +209,8 @@ def site(overrides):
         else:
             data = {}
             for filename in ('porting.toml', 'board.toml'):
-                with urlopen(f'https://raw.githubusercontent.com/{repo}/{revision}/{filename}', timeout=30) as response:
-                    data[filename] = tomllib.loads(response.read().decode())
+                body = fetch_bytes(f'https://raw.githubusercontent.com/{repo}/{revision}/{filename}', max_bytes=1024 * 1024)
+                data[filename] = tomllib.loads(body.decode())
             record = validate(data['porting.toml'], data['board.toml'], name)
         need(record['device']['name'] == name, f'{name}: record name mismatch')
         for zh in (False, True):

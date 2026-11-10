@@ -14,7 +14,8 @@ import time
 import tomllib
 from urllib.error import HTTPError
 from urllib.parse import urlencode
-from urllib.request import Request, urlopen
+from urllib.request import Request, build_opener
+from github_download import SafeRedirect, retry_delay
 
 ROOT = Path(__file__).resolve().parents[1]
 SNAPSHOTS = ROOT / 'docs/.vitepress/device-records'
@@ -46,15 +47,18 @@ class GitHub:
         for attempt in range(4):
             try:
                 request = Request('https://api.github.com/' + path, data=data, headers=headers)
-                with urlopen(request, timeout=60) as response:
+                with build_opener(SafeRedirect()).open(request, timeout=60) as response:
                     body = response.read(32 * 1024 * 1024 + 1)
                 if len(body) > 32 * 1024 * 1024:
                     raise ValueError('GitHub response exceeds 32 MiB')
                 return json.loads(body)
             except HTTPError as error:
-                if error.code not in (429, 500, 502, 503, 504) or attempt == 3:
+                delay = retry_delay(error, attempt)
+                if delay is None or delay > 120 or attempt == 3:
                     raise
-                time.sleep(2 ** attempt)
+                error.close()
+                print(f'GitHub catalog - HTTP {error.code} - retry {attempt + 1}/3 - wait {delay:.0f}s', flush=True)
+                time.sleep(delay)
 
     def search(self, query):
         found = []

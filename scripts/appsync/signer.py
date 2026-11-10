@@ -8,9 +8,12 @@ import os
 from pathlib import Path
 import shutil
 import subprocess
+import sys
 import tarfile
 import tempfile
-import urllib.request
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from github_download import atomic_write, fetch_bytes
 
 ROOT = Path(__file__).resolve().parent
 SOURCES = json.loads((ROOT / 'signer-sources.json').read_text())
@@ -72,11 +75,10 @@ def build(output, host=False):
         name, record = item
         archive = archives / (record['directory'] + '.tar.gz')
         if not archive.is_file():
-            with urllib.request.urlopen(record['url'], timeout=120) as response:
-                data = response.read()
+            data = fetch_bytes(record['url'], timeout=120, max_bytes=128 * 1024 * 1024)
             if hashlib.sha256(data).hexdigest() != record['sha256']:
                 raise ValueError('source archive digest mismatch: ' + name)
-            archive.write_bytes(data)
+            atomic_write(archive, data)
         if sha(archive) != record['sha256']:
             raise ValueError('source archive digest mismatch: ' + name)
         return name, archive
