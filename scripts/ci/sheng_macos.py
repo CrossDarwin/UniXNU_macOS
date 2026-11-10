@@ -172,13 +172,13 @@ def prepare_inputs(ctx, init_data: bool) -> None:
                   trusted_key_sha256=hashlib.sha256(anchor).hexdigest(), real_c_signature_and_block_verification=True,
                   original_image_modified=False, host_only=True, boot_root_authenticated=False,
                   qemu_tested=False, hardware_tested=False))
+        shutil.rmtree(signed)
         objects.append(f'{name}.vroot={table}')
         inputs.append({'name': name, 'image': str(image), 'table': str(table)})
         print(f'{name}: signed policy and {checks[name]["blocks_verified"]} blocks verified', flush=True)
     ctx.args.object = objects
-    raw = userdata.build(ctx)
-    # The verified report is reused by the streaming sparse writer; the raw copy is disposable.
-    raw.unlink()
+    # Hash each raw window without materializing another complete root disk.
+    userdata.build(ctx, report_only=True)
     runtime = ctx.work / 'runtime'
     runtime.mkdir(parents=True, exist_ok=True)
     seed = runtime / 'data.dbr'
@@ -210,6 +210,10 @@ def collect(ctx, destination: Path) -> None:
     require(not destination.exists(), 'Refuse to replace an existing artifact directory')
     destination.mkdir(parents=True)
     sparse = destination / 'userdata-full.img'
+    minimum = json.loads((rootdir / 'userdata-root.json').read_text())['image_bytes'] + 3 * 2**30
+    available = shutil.disk_usage(destination).free
+    require(available >= minimum, f'Not enough space to assemble userdata: need {minimum / 2**30:.1f} GiB,'
+            f' have {available / 2**30:.1f} GiB')
     command = [sys.executable, str(ctx.device / 'scripts/make-userdata-full.py'),
                *[item['image'] for item in inputs['windows'][:2]], str(rootdir / 'userdata-root.json'),
                str(inputs['partition_bytes']), str(sparse),
@@ -223,6 +227,12 @@ def collect(ctx, destination: Path) -> None:
     require((magic, major, minor, file_header, chunk_header, block) == (0xED26FF3A, 1, 0, 28, 12, BLOCK),
             'Unexpected Android sparse header')
     require(count * block == inputs['partition_bytes'] and chunks > 0 and checksum == 0, 'Sparse geometry mismatch')
+    # No later build step needs the mounted OS images; retain their identity records.
+    image_cache = (ctx.out_root / 'ipsw').resolve()
+    for window in inputs['windows']:
+        image = Path(window['image']).resolve()
+        require(image.is_relative_to(image_cache), 'Refuse to remove an image outside the build cache')
+        image.unlink()
     files = {'boot.img': ctx.work / 'boot/boot.img', 'payload.img': ctx.work / 'payload/payload.img',
              'kernel.macho': ctx.work / 'kernel/kernel.macho', 'package.manifest.json': ctx.work / 'package.manifest.json',
              'userdata-root.json': rootdir / 'userdata-root.json', 'data.dbr': ctx.work / 'runtime/data.dbr',

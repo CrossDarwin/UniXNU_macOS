@@ -27,7 +27,8 @@ env:
   HOMEBREW_NO_ENV_HINTS: '1'
   PYTHONUNBUFFERED: '1'
   UNIXNU_IPSW_RANGE_CACHE: ${{ github.workspace }}/UniXNU/out/ipsw-ranges
-  UNIXNU_IPSW_CACHE_MIB: '5120'
+  UNIXNU_IPSW_CACHE_MIB: '2048'
+  UNIXNU_PRUNE_AEA: '1'
   PROFILE: macos-27.3-26C5035r
   WORK: out/sheng/macos-27.3-26C5035r/sheng_macos
 
@@ -62,7 +63,6 @@ jobs:
           repository: UniXNU/uefi-sheng
           ref: 66421cb7bb5694843aec8de1ca3d1de4c20cca38
           path: uefi-sheng
-          submodules: recursive
 
       - name: Check host and package inputs
         env:
@@ -74,8 +74,11 @@ jobs:
           xcodebuild -version
           xcrun --sdk iphoneos --show-sdk-version
           python3 -m unittest discover -s scripts/ci -p 'test_*.py' -v
-          PYTHONPATH=scripts python3 -m unittest unixnu.test_ipsw_progress -v
+          PYTHONPATH=scripts python3 -m unittest unixnu.test_ipsw_progress unixnu.test_userdata_report -v
           df -h .
+
+      - name: Prepare runner disk capacity
+        run: python3 scripts/ci/disk_space.py --min-free-gib 50
 
       - name: Install build tools
         run: |
@@ -190,10 +193,9 @@ jobs:
       - name: Compress the test package
         run: |
           set -euo pipefail
-          tar -C out/sheng-macos-test -cf - . | zstd -T0 -3 -o out/sheng-macos-test.tar.zst
-          (cd out && shasum -a 256 sheng-macos-test.tar.zst > sheng-macos-test.tar.zst.sha256)
-          split -b 1900m out/sheng-macos-test.tar.zst out/sheng-macos-test.tar.zst.part-
-          rm out/sheng-macos-test.tar.zst
+          tar -C out/sheng-macos-test -cf - . | zstd -T0 -3 | split -b 1900m - out/sheng-macos-test.tar.zst.part-
+          cat out/sheng-macos-test.tar.zst.part-* | shasum -a 256 | \
+            awk '{print $1 "  sheng-macos-test.tar.zst"}' > out/sheng-macos-test.tar.zst.sha256
 
       - name: Upload the device test package
         uses: actions/upload-artifact@v4
@@ -205,6 +207,10 @@ jobs:
           path: |
             UniXNU/out/sheng-macos-test.tar.zst.part-*
             UniXNU/out/sheng-macos-test.tar.zst.sha256
+
+      - name: Release diagnostic disk reserve
+        if: always()
+        run: rm -f out/diagnostic-reserve.bin
 
       - name: Collect sanitized build logs
         if: always()

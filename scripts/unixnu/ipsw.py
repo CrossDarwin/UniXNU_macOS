@@ -13,6 +13,7 @@ import json
 import os
 import platform
 import plistlib
+import shutil
 import struct
 import subprocess
 import tempfile
@@ -50,7 +51,8 @@ class RangeDiskCache:
 
     def put(self, start, data):
         path = self.directory / f'{start:016x}.block'
-        if path.exists() or self.used + len(data) + 32 > self.limit:
+        if (path.exists() or self.used + len(data) + 32 > self.limit
+                or shutil.disk_usage(self.root).free < len(data) + 8 * 2**30):
             return
         temporary = None
         try:
@@ -254,11 +256,24 @@ class Ipsw:
                         and (pin is None or pin == source.get('sha256')) \
                         and data.get('size') == plain.stat().st_size \
                         and sha256_file(plain) == data.get('sha256'):
+                    prune_aea(archive)
                     return plain
         path = self.extract(component)
         if path.suffix != '.aea':
             return path
         return decrypt_aea(path)
+
+
+def prune_aea(path):
+    """Drop only a downloaded encrypted copy after its plain image and records exist."""
+    if os.environ.get('UNIXNU_PRUNE_AEA') != '1':
+        return
+    out = path.with_suffix('')
+    if (out.is_file() and out.with_suffix(out.suffix + '.json').is_file()
+            and path.with_suffix(path.suffix + '.json').is_file() and path.is_file()):
+        size = path.stat().st_size
+        path.unlink()
+        log(f'ipsw: released encrypted copy {path.name} ({size / 2**20:.0f} MiB)')
 
 
 def decrypt_aea(path):
@@ -273,6 +288,7 @@ def decrypt_aea(path):
         data = json.loads(record.read_text())
         if data.get('aea_sha256') == json.loads(path.with_suffix(path.suffix + '.json').read_text()).get('sha256') \
                 and data.get('size') == out.stat().st_size:
+            prune_aea(path)
             return out
     if platform.system() != 'Darwin':
         raise Error(f'{path.name} is AEA encrypted; decrypting it needs macOS /usr/bin/aea')
@@ -294,6 +310,7 @@ def decrypt_aea(path):
     source = json.loads(path.with_suffix(path.suffix + '.json').read_text())
     record.write_text(json.dumps({'member': source.get('member'), 'aea_sha256': source.get('sha256'),
                                   'size': out.stat().st_size, 'sha256': sha256_file(out)}, indent=2) + '\n')
+    prune_aea(path)
     return out
 
 

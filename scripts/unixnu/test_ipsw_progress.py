@@ -10,7 +10,7 @@ import threading
 import unittest
 from unittest.mock import patch
 
-from unixnu.ipsw import RangeDiskCache, RangeFile
+from unixnu.ipsw import RangeDiskCache, RangeFile, prune_aea
 from unixnu.progress import Progress
 
 
@@ -86,6 +86,27 @@ class TransferTests(unittest.TestCase):
         self.assertEqual(restarted.get(0, 1024), b'a' * 1024)
         self.assertIsNone(restarted.get(1024, 1024))
         self.assertLessEqual(restarted.used, 1024 + 32)
+
+
+class PruneTests(unittest.TestCase):
+    def test_encrypted_copy_is_removed_only_when_enabled_and_complete(self):
+        with tempfile.TemporaryDirectory() as directory:
+            archive = Path(directory) / 'OS.dmg.aea'
+            archive.write_bytes(b'encrypted')
+            plain = archive.with_suffix('')
+            plain.write_bytes(b'plain')
+            with patch.dict(os.environ, {'UNIXNU_PRUNE_AEA': '1'}):
+                prune_aea(archive)
+                self.assertTrue(archive.exists())
+                for path in (archive, plain):
+                    path.with_suffix(path.suffix + '.json').write_text('{}')
+                with patch.dict(os.environ, {'UNIXNU_PRUNE_AEA': '0'}):
+                    prune_aea(archive)
+                self.assertTrue(archive.exists())
+                prune_aea(archive)
+            self.assertFalse(archive.exists())
+            self.assertEqual(plain.read_bytes(), b'plain')
+            self.assertTrue(archive.with_suffix('.aea.json').exists())
 
 
 class ProgressTests(unittest.TestCase):

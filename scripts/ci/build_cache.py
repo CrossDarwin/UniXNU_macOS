@@ -4,6 +4,7 @@ import argparse
 import hashlib
 import json
 from pathlib import Path
+import shutil
 import subprocess
 import sys
 
@@ -44,24 +45,58 @@ def pack(kind, base, output):
     if not paths:
         print(f'{kind} cache: no reusable files', flush=True)
         return False
+    if shutil.disk_usage(base).free < LIMITS[kind] + 512 * 2**20:
+        print(f'{kind} cache: skipped because the runner is low on disk space', flush=True)
+        return False
     output.parent.mkdir(parents=True, exist_ok=True)
     # Signing keys are regenerated locally and never enter a shared compiler cache.
     command = ['tar', '-cf', '-', '--exclude=*.partial',
                '--exclude=*/verified-root-host/keys', '-C', str(base), *paths]
     producer = subprocess.Popen(command, stdout=subprocess.PIPE)
+    compressor = None
+    oversized = False
     try:
-        compressor = subprocess.run(['zstd', '-T0', '-3', '-o', str(output)], stdin=producer.stdout)
+        compressor = subprocess.Popen(['zstd', '-T0', '-3'], stdin=producer.stdout, stdout=subprocess.PIPE)
+        producer.stdout.close()
+        with output.open('wb') as target:
+            size = 0
+            while data := compressor.stdout.read(1 << 20):
+                size += len(data)
+                if size > LIMITS[kind]:
+                    oversized = True
+                    break
+                target.write(data)
+        complete = not oversized
+        if complete:
+            compressor.wait(timeout=10)
+            producer.wait(timeout=10)
+    except BaseException:
+        output.unlink(missing_ok=True)
+        raise
     finally:
         producer.stdout.close()
-        status = producer.wait()
-    if status or compressor.returncode:
+        if compressor is not None:
+            compressor.stdout.close()
+        # Stop both processes on a size limit or an interrupted/failed write.
+        for process in (compressor, producer):
+            if process is not None and process.poll() is None:
+                process.terminate()
+        for process in (compressor, producer):
+            if process is not None:
+                try:
+                    process.wait(timeout=10)
+                except subprocess.TimeoutExpired:
+                    process.kill()
+                    process.wait()
+    compressed, status = compressor.returncode, producer.returncode
+    if oversized:
+        output.unlink()
+        print(f'{kind} cache: skipped archive above the {LIMITS[kind] / 2**20:.0f} MiB limit', flush=True)
+        return False
+    if status or compressed:
         output.unlink(missing_ok=True)
         raise RuntimeError(f'{kind}: could not archive reusable inputs')
     size = output.stat().st_size
-    if size > LIMITS[kind]:
-        output.unlink()
-        print(f'{kind} cache: skipped {size / 2**20:.0f} MiB archive; limit {LIMITS[kind] / 2**20:.0f} MiB', flush=True)
-        return False
     print(f'{kind} cache: {size / 2**20:.1f} MiB saved', flush=True)
     return True
 
@@ -78,7 +113,8 @@ def unpack(archive, base):
         status = producer.wait()
     if status or consumer.returncode:
         raise RuntimeError(f'could not restore {archive}')
-    print(f'cache restored: {archive.name}', flush=True)
+    archive.unlink()
+    print(f'cache restored: {archive.name}; removed the unpacked archive', flush=True)
 
 
 def main():

@@ -82,7 +82,7 @@ def disk_blocks(dmg, size):
         subprocess.run(['hdiutil', 'detach', device], capture_output=True)
 
 
-def build(ctx, dry_run=False):
+def build(ctx, dry_run=False, report_only=False):
     log('userdata payload')
     spec = ctx.board.get('userdata')
     if not spec:
@@ -139,16 +139,19 @@ def build(ctx, dry_run=False):
     out, image, report = paths(ctx)
     out.mkdir(parents=True, exist_ok=True)
     entries = []
-    with image.open('wb') as target:
-        target.truncate(total)
+    with (contextlib.nullcontext(None) if report_only else image.open('wb')) as target:
+        if target is not None:
+            target.truncate(total)
         for (name, offset, size), (_, dmg) in zip(layout, sources):
             digest = hashlib.sha256()
-            target.seek(offset)
+            if target is not None:
+                target.seek(offset)
             done = 0
             with contextlib.closing(disk_blocks(dmg, size)) as blocks:
                 for data in blocks:
                     digest.update(data)
-                    target.write(data)
+                    if target is not None:
+                        target.write(data)
                     done += len(data)
             if done != size:
                 raise Error(f'{dmg.name}: {done} bytes of raw disk, expected {size}')
@@ -161,8 +164,9 @@ def build(ctx, dry_run=False):
                 data = handle.read(size)
             if len(data) != size:
                 raise Error(f'{path}: short read for object {name}')
-            target.seek(offset)
-            target.write(data)
+            if target is not None:
+                target.seek(offset)
+                target.write(data)
             object_entries.append((name, offset, size, hashlib.sha256(data).digest()))
             log(f'userdata: object {name} {size} bytes at {offset:#x} from {path.name}')
         header = bytearray(4096)
@@ -172,14 +176,17 @@ def build(ctx, dry_run=False):
         for index, ((name, offset, size, digest), block, flags) in enumerate(rows):
             struct.pack_into('<32sQQII32s40s', header, 24 + 128 * index, name.encode(), offset, size, block, flags, digest, bytes(40))
         header[4064:4096] = hashlib.sha256(bytes(header[:4064])).digest()
-        target.seek(0)
-        target.write(header)
-    data = {'image_bytes': total, 'image_sha256': sha256_file(image), 'manifest_sha256': hashlib.sha256(bytes(header)).hexdigest(),
+        if target is not None:
+            target.seek(0)
+            target.write(header)
+    data = {'image_bytes': total, 'image_sha256': None if report_only else sha256_file(image),
+            'image_materialized': not report_only, 'manifest_sha256': hashlib.sha256(bytes(header)).hexdigest(),
             'windows': [{'name': n, 'offset': o, 'size': s, 'sha256': d.hex()} for n, o, s, d in entries],
             'objects': [{'name': n, 'offset': o, 'size': s, 'sha256': d.hex()} for n, o, s, d in object_entries],
-            'userdata_bytes': capacity, 'flash_command': f'fastboot flash userdata {image}',
+            'userdata_bytes': capacity, 'flash_command': None if report_only else f'fastboot flash userdata {image}',
             'source': 'remote' if source.remote else 'local', 'hardware_tested': False}
     report.write_text(json.dumps(data, indent=2) + '\n')
-    log(f'userdata: {image}')
-    log(f'flash it yourself with: {data["flash_command"]}')
-    return image
+    log(f'userdata: {report if report_only else image}')
+    if not report_only:
+        log(f'flash it yourself with: {data["flash_command"]}')
+    return report if report_only else image
