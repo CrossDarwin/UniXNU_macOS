@@ -1,16 +1,18 @@
 """Transfer progress and validated range reuse across process restarts."""
 import contextlib
 import hashlib
-from http.server import BaseHTTPRequestHandler, HTTPServer
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import io
 import os
 from pathlib import Path
 import tempfile
 import threading
+import time
 import unittest
+import zipfile
 from unittest.mock import patch
 
-from unixnu.ipsw import RangeDiskCache, RangeFile, prune_aea
+from unixnu.ipsw import Ipsw, RangeDiskCache, RangeFile, prune_aea
 from unixnu.progress import Progress
 
 
@@ -29,14 +31,35 @@ class TransferTests(unittest.TestCase):
                 self.end_headers()
             def do_GET(self):
                 start, end = map(int, self.headers['Range'].removeprefix('bytes=').split('-'))
-                owner.gets.append((start, end))
-                self.send_response(206)
-                data = owner.body[start:end + 1]
-                self.send_header('Content-Length', str(len(data)))
-                self.end_headers()
-                self.wfile.write(data)
+                with owner.lock:
+                    owner.gets.append((start, end))
+                    owner.active += 1
+                    owner.maximum = max(owner.maximum, owner.active)
+                    reject = start in owner.fail_once
+                    owner.fail_once.discard(start)
+                try:
+                    if reject:
+                        self.send_error(503)
+                        return
+                    if end > start:
+                        time.sleep(owner.delay)
+                    self.send_response(206)
+                    data = owner.body[start:end + 1]
+                    self.send_header('Content-Length', str(len(data)))
+                    offset = start + 1 if owner.wrong_offset else start
+                    self.send_header('Content-Range', f'bytes {offset}-{end}/{len(owner.body)}')
+                    self.end_headers()
+                    self.wfile.write(data)
+                finally:
+                    with owner.lock:
+                        owner.active -= 1
+        self.lock = threading.Lock()
+        self.active = self.maximum = 0
+        self.delay = 0
+        self.fail_once = set()
+        self.wrong_offset = False
         self.etag = 'release-1'
-        self.server = HTTPServer(('127.0.0.1', 0), Handler)
+        self.server = ThreadingHTTPServer(('127.0.0.1', 0), Handler)
         self.thread = threading.Thread(target=self.server.serve_forever, daemon=True)
         self.thread.start()
         self.temp = tempfile.TemporaryDirectory()
@@ -77,6 +100,73 @@ class TransferTests(unittest.TestCase):
         self.body = self.body[::-1]
         self.etag = 'release-2'
         self.assertEqual(self.download(), (self.body, len(self.body), 0))
+
+    def test_eight_connections_are_bounded_to_the_selected_window(self):
+        self.body = bytes(range(256)) * 128
+        self.delay = 0.1
+        with RangeFile(self.url, block=1024, workers=8) as source:
+            source.seek(4096)
+            with source.prefetch(8192):
+                self.assertEqual(source.read(8192), self.body[4096:12288])
+            self.assertEqual(source.prefetch_end, 0)
+            self.assertLessEqual(len(source.cache), 8)
+        self.assertGreater(self.maximum, 1)
+        self.assertLessEqual(self.maximum, 8)
+        self.assertEqual(sorted(self.gets), [(0, 0)] + [(i*1024, i*1024+1023) for i in range(4,12)])
+        self.assertFalse(any(t.name.startswith('ipsw-range') for t in threading.enumerate()))
+
+    def test_parallel_download_reuses_validated_cache_after_restart(self):
+        self.body = bytes(range(256)) * 64
+        environment = {'UNIXNU_IPSW_RANGE_CACHE': self.temp.name, 'UNIXNU_IPSW_CACHE_MIB': '1'}
+        for restarted in (False, True):
+            self.gets.clear()
+            with patch.dict(os.environ, environment), RangeFile(self.url, block=1024, workers=8) as source:
+                with source.prefetch(len(self.body)):
+                    self.assertEqual(source.read(), self.body)
+                self.assertEqual(source.downloaded, 0 if restarted else len(self.body))
+                self.assertEqual(source.reused, len(self.body) if restarted else 0)
+            if restarted:
+                self.assertEqual(self.gets, [(0, 0)])
+
+    def test_parallel_failure_retries_only_the_failed_range(self):
+        self.body = bytes(range(256)) * 32
+        self.fail_once = {2048}
+        with RangeFile(self.url, block=1024, workers=8) as source:
+            with source.prefetch(len(self.body)):
+                self.assertEqual(source.read(), self.body)
+        self.assertEqual(self.gets.count((2048,3071)), 2)
+        self.assertEqual(len(self.gets), 10)
+
+    def test_wrong_response_offset_is_rejected(self):
+        with RangeFile(self.url, block=1024, retries=1, workers=8) as source:
+            self.wrong_offset = True
+            with self.assertRaisesRegex(OSError, 'offset'):
+                source.read(1024)
+        self.assertFalse(any(t.name.startswith('ipsw-range') for t in threading.enumerate()))
+
+    def test_actual_zip_extraction_keeps_crc_and_sha256_checks(self):
+        data = os.urandom(32*1024)
+        for compression in (zipfile.ZIP_STORED, zipfile.ZIP_DEFLATED):
+            buffer = io.BytesIO()
+            with zipfile.ZipFile(buffer, 'w', compression=compression) as archive:
+                archive.writestr('OS.dmg.aea', data)
+                archive.writestr('unrelated.bin', os.urandom(64*1024))
+            self.body = buffer.getvalue()
+            self.gets.clear()
+            with RangeFile(self.url, block=1024, workers=8) as stream, zipfile.ZipFile(stream) as archive:
+                source = Ipsw.__new__(Ipsw)
+                source.stream, source.zip, source.remote = stream, archive, True
+                source.identity = {'Manifest': {'OS': {'Info': {'Path': 'OS.dmg.aea'}}}}
+                source.config = {'sha256': {'OS.dmg.aea': hashlib.sha256(data).hexdigest()}}
+                source.cache = Path(self.temp.name)/str(compression)
+                self.assertEqual(source.extract('OS').read_bytes(), data)
+                self.assertEqual(stream.prefetch_end, 0)
+                self.assertLess(stream.downloaded, len(self.body))
+
+    def test_worker_limit_is_validated_before_network_access(self):
+        for workers in (0,9):
+            with self.assertRaisesRegex(Exception, 'workers'):
+                RangeFile(self.url, workers=workers)
 
     def test_budget_keeps_prefix_without_scan_eviction(self):
         cache = RangeDiskCache(self.temp.name, 'fixture', 1024 + 32)

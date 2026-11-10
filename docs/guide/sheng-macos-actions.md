@@ -67,6 +67,13 @@ IPSW extraction reports bytes, percentage, average speed and estimated remaining
 time every ten seconds. A quiet transfer reports how long it has received no new
 data. Failed HTTP requests report retries and backoff.
 
+The sheng workflow uses eight concurrent range requests for blocks overlapping
+the selected ZIP member. Metadata reads remain serial. Set `UNIXNU_IPSW_WORKERS`
+to a value from `1` to `8` for local builds; `1` selects serial reads. The library
+default is four. Prefetch is bounded by the worker count and 8 MiB block size.
+Each response must match its requested offset and source size. Only the failed
+range is retried; validated cache blocks retain their restart reuse.
+
 Later runs reuse up to 2 GiB of downloaded HTTP ranges, a source archive up to
 1 GiB and a compiler-output archive up to 2 GiB. Data seeds keep their separate
 installation cache. Root image ranges require a matching URL, size and HTTP

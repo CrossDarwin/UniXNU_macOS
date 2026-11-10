@@ -30,6 +30,7 @@ env:
   NINJA_STATUS: '[%f/%t %p - %es] '
   UNIXNU_IPSW_RANGE_CACHE: ${{ github.workspace }}/UniXNU/out/ipsw-ranges
   UNIXNU_IPSW_CACHE_MIB: '2048'
+  UNIXNU_IPSW_WORKERS: '8'
   UNIXNU_PRUNE_AEA: '1'
   PROFILE: macos-27.3-26C5035r
   WORK: out/sheng/macos-27.3-26C5035r/sheng_macos

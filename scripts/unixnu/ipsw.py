@@ -7,6 +7,8 @@ out/ipsw/<build>/ with their sha256, and checked against the pins of board.toml 
 The board describes the image in [ipsw]: url (the default remote source), product, version, build, device_class,
 chip_id, board_id, and the components the steps use.
 """
+from concurrent.futures import ThreadPoolExecutor
+from contextlib import contextmanager, nullcontext
 import hashlib
 import io
 import json
@@ -17,6 +19,7 @@ import shutil
 import struct
 import subprocess
 import tempfile
+import threading
 import time
 import urllib.error
 import urllib.request
@@ -70,8 +73,13 @@ class RangeDiskCache:
 class RangeFile(io.RawIOBase):
     """A read-only seekable view of a remote file, fetched with HTTP range requests and a small block cache."""
 
-    def __init__(self, url, block=CHUNK, retries=4):
+    def __init__(self, url, block=CHUNK, retries=4, workers=None):
         self.url, self.block, self.retries = url, block, retries
+        self.workers = int(os.environ.get('UNIXNU_IPSW_WORKERS', '4')) if workers is None else workers
+        if not 1 <= self.workers <= 8 or block <= 0 or retries <= 0:
+            raise Error('IPSW workers must be 1..8; block size and retries must be positive')
+        self.prefetch_end = 0
+        self.stats_lock = threading.Lock()
         self.position = 0
         self.cache = {}
         self.downloaded = self.reused = 0
@@ -79,6 +87,7 @@ class RangeFile(io.RawIOBase):
         with urllib.request.urlopen(request, timeout=60) as response:
             self.size = int(response.headers['Content-Length'])
             validator = response.headers.get('ETag') or response.headers.get('Last-Modified')
+            self.validator = validator if validator and not validator.startswith('W/') else response.headers.get('Last-Modified')
         self.disk_cache = None
         directory = os.environ.get('UNIXNU_IPSW_RANGE_CACHE')
         if directory and validator:
@@ -104,37 +113,96 @@ class RangeFile(io.RawIOBase):
         self.position = {0: offset, 1: self.position + offset, 2: self.size + offset}[whence]
         return self.position
 
-    def _block(self, index):
-        if index not in self.cache:
-            if len(self.cache) >= 4:
-                self.cache.pop(next(iter(self.cache)))
-            start = index * self.block
-            end = min(start + self.block, self.size) - 1
-            cached = self.disk_cache.get(start, end - start + 1) if self.disk_cache else None
-            if cached is not None:
-                self.cache[index] = cached
-                self.reused += len(cached)
-                return cached
-            for attempt in range(self.retries):
-                try:
-                    request = urllib.request.Request(self.url, headers={'Range': f'bytes={start}-{end}'})
-                    with urllib.request.urlopen(request, timeout=120) as response:
-                        if response.status != 206:
-                            raise OSError('range request did not return HTTP 206')
-                        data = response.read()
-                    if len(data) != end - start + 1:
-                        raise OSError('short range response')
-                    self.cache[index] = data
+    @contextmanager
+    def prefetch(self, compressed_bytes):
+        """Read ahead over blocks intersecting the selected ZIP member; metadata stays serial."""
+        previous = self.prefetch_end
+        self.prefetch_end = min(self.size, self.position + compressed_bytes)
+        log(f'ipsw: {self.workers} range connections - {self.block / 2**20:g} MiB blocks'
+            f' - read-ahead bound {self.workers * self.block / 2**20:g} MiB')
+        try:
+            yield
+        finally:
+            self.prefetch_end = previous
+
+    def _fetch(self, index, stop):
+        start = index * self.block
+        end = min(start + self.block, self.size) - 1
+        for attempt in range(self.retries):
+            if stop.is_set():
+                raise Error('IPSW range read cancelled')
+            try:
+                headers = {'Range': f'bytes={start}-{end}'}
+                if self.validator:
+                    headers['If-Range'] = self.validator
+                with urllib.request.urlopen(urllib.request.Request(self.url, headers=headers), timeout=30) as response:
+                    if response.status != 206:
+                        raise OSError('range request did not return HTTP 206')
+                    expected = f'bytes {start}-{end}/{self.size}'
+                    if response.headers.get('Content-Range') != expected:
+                        raise OSError('range response does not match the requested offset or source size')
+                    data = response.read(end - start + 2)
+                if len(data) != end - start + 1:
+                    raise OSError('short or oversized range response')
+                with self.stats_lock:
                     self.downloaded += len(data)
-                    if self.disk_cache:
-                        self.disk_cache.put(start, data)
-                    break
-                except (OSError, urllib.error.URLError) as error:
-                    if attempt == self.retries - 1:
-                        raise
-                    log(f'ipsw: retry {attempt + 1}/{self.retries - 1} at byte {start} - {type(error).__name__}'
-                        f' - backoff {2 ** attempt}s')
-                    time.sleep(2 ** attempt)
+                return data
+            except (OSError, urllib.error.URLError) as error:
+                if isinstance(error, urllib.error.HTTPError):
+                    error.close()
+                if attempt == self.retries - 1:
+                    raise
+                log(f'ipsw: retry {attempt + 1}/{self.retries - 1} at byte {start} - {type(error).__name__}'
+                    f' - backoff {2 ** attempt}s')
+                if stop.wait(2 ** attempt):
+                    raise Error('IPSW range read cancelled') from error
+
+    def _remember(self, index, data):
+        if index not in self.cache and len(self.cache) >= max(4, self.workers):
+            self.cache.pop(next(iter(self.cache)))
+        self.cache[index] = data
+
+    def _block(self, index):
+        if index in self.cache:
+            return self.cache[index]
+        count = 1
+        if index * self.block < self.prefetch_end:
+            count = min(self.workers, (self.prefetch_end + self.block - 1) // self.block - index)
+        missing = []
+        for number in range(index, index + count):
+            if number in self.cache:
+                continue
+            start = number * self.block
+            size = min(self.block, self.size - start)
+            data = self.disk_cache.get(start, size) if self.disk_cache else None
+            if data is not None:
+                self._remember(number, data)
+                self.reused += len(data)
+            else:
+                missing.append(number)
+        stop = threading.Event()
+        # Workers only fetch. Cache writes remain ordered on the reader thread.
+        if missing:
+            with ThreadPoolExecutor(max_workers=min(self.workers, len(missing)), thread_name_prefix='ipsw-range') as pool:
+                futures = [(number, pool.submit(self._fetch, number, stop)) for number in missing]
+                try:
+                    failure = None
+                    for number, future in futures:
+                        try:
+                            data = future.result()
+                        except Exception as error:
+                            failure = failure or error
+                            continue
+                        self._remember(number, data)
+                        if self.disk_cache:
+                            self.disk_cache.put(number * self.block, data)
+                    if failure is not None:
+                        raise failure
+                except BaseException:
+                    stop.set()
+                    for _, future in futures:
+                        future.cancel()
+                    raise
         return self.cache[index]
 
     def readinto(self, buffer):
@@ -217,10 +285,12 @@ class Ipsw:
         digest = hashlib.sha256()
         log(f'ipsw: extracting {component} ({name}, {size >> 20} MiB)')
         with Progress(f'ipsw {component}', size) as progress, self.zip.open(name) as source, partial.open('wb') as target:
-            while chunk := source.read(CHUNK):
-                target.write(chunk)
-                digest.update(chunk)
-                progress.advance(len(chunk))
+            window = self.stream.prefetch(self.zip.getinfo(name).compress_size) if self.remote else nullcontext()
+            with window:
+                while chunk := source.read(CHUNK):
+                    target.write(chunk)
+                    digest.update(chunk)
+                    progress.advance(len(chunk))
         if partial.stat().st_size != size:
             partial.unlink()
             raise Error(f'incomplete extraction of {name}')
