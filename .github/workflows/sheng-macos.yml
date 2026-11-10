@@ -153,9 +153,9 @@ jobs:
           GITHUB_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          args=()
+          args=(inputs --device ../device --uefi ../uefi-sheng)
           if [ "$INIT_DATA" = true ]; then args+=(--init-data); fi
-          python3 scripts/ci/sheng_macos.py inputs --device ../device --uefi ../uefi-sheng "${args[@]}"
+          python3 scripts/ci/sheng_macos.py "${args[@]}"
 
       - name: Preserve the installation seed
         if: steps.seed.outputs.cache-hit != 'true'
