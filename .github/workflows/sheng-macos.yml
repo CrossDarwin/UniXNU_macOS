@@ -1,0 +1,210 @@
+name: sheng macOS test package
+run-name: sheng macOS 27.3 - ${{ github.ref_name }}
+
+on:
+  workflow_dispatch:
+    inputs:
+      init_data:
+        description: Create a Data seed for a NEW installation when no saved seed exists
+        type: boolean
+        default: false
+  push:
+    branches: [sheng/macos-actions]
+    paths:
+      - .github/workflows/sheng-macos.yml
+      - scripts/ci/sheng_macos.py
+      - scripts/ci/test_sheng_macos.py
+
+permissions:
+  contents: read
+
+concurrency:
+  group: sheng-macos-${{ github.ref }}
+  cancel-in-progress: false
+
+defaults:
+  run:
+    shell: bash
+    working-directory: UniXNU
+
+env:
+  HOMEBREW_NO_AUTO_UPDATE: '1'
+  HOMEBREW_NO_INSTALL_CLEANUP: '1'
+  HOMEBREW_NO_ENV_HINTS: '1'
+  PYTHONUNBUFFERED: '1'
+  PROFILE: macos-27.3-26C5035r
+  WORK: out/sheng/macos-27.3-26C5035r/sheng_macos
+
+jobs:
+  package:
+    runs-on: xcode-27
+    timeout-minutes: 360
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: UniXNU
+          submodules: recursive
+      - uses: actions/checkout@v4
+        with:
+          repository: UniXNU/UniXNU-sheng
+          ref: 89a9686ee45cf66ad6f873d6d6180bda966892c1
+          path: device
+          submodules: recursive
+      - uses: actions/checkout@v4
+        with:
+          repository: UniXNU/uefi-sheng
+          ref: 66421cb7bb5694843aec8de1ca3d1de4c20cca38
+          path: uefi-sheng
+          submodules: recursive
+
+      - name: Check host and package inputs
+        env:
+          SEED: ${{ secrets.UNIXNU_UNIQUE_CHIP_ID }}
+        run: |
+          set -euo pipefail
+          [[ "$SEED" =~ ^[0-9a-fA-F]{8}$ ]] || { echo 'Missing UNIXNU_UNIQUE_CHIP_ID secret'; exit 1; }
+          test "$(uname -m)" = arm64
+          xcodebuild -version
+          xcrun --sdk iphoneos --show-sdk-version
+          python3 -m unittest discover -s scripts/ci -p 'test_*.py' -v
+          df -h .
+
+      - name: Install build tools
+        run: |
+          set -euo pipefail
+          brew install dtc llvm lld cmake mtools ninja glslang shaderc spirv-tools bison pkgconf rustup openssl@3 unifdef zstd blacktop/tap/ipsw
+          {
+            echo "$HOME/.cargo/bin"
+            echo /opt/homebrew/opt/llvm/bin
+            echo /opt/homebrew/opt/lld/bin
+            echo /opt/homebrew/opt/bison/bin
+          } >> "$GITHUB_PATH"
+          rustup toolchain install 1.98.0 --profile minimal --component rust-src
+          for tool in python3 clang xcodebuild make git ninja cmake dtc fdtget fdtput aea compression_tool mformat mcopy ipsw; do
+            command -v "$tool" >/dev/null
+          done
+
+      - name: Resolve the installation cache
+        id: installation
+        env:
+          SEED: ${{ secrets.UNIXNU_UNIQUE_CHIP_ID }}
+        run: |
+          python3 - <<'PY'
+          import hashlib, os
+          identity = hashlib.sha256(os.environ['SEED'].encode()).hexdigest()[:16]
+          with open(os.environ['GITHUB_OUTPUT'], 'a') as output:
+              output.write(f'key=sheng-macos-data-v1-{os.environ["PROFILE"]}-{identity}\n')
+          PY
+      - uses: actions/cache/restore@v4
+        id: seed
+        with:
+          path: |
+            UniXNU/out/sheng/macos-27.3-26C5035r/sheng_macos/runtime/data.dbr
+            UniXNU/out/sheng/macos-27.3-26C5035r/sheng_macos/runtime/ci-seed.json
+          key: ${{ steps.installation.outputs.key }}
+
+      - name: Fetch pinned sources
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          ./unixnu defconfig sheng_macos_defconfig --device ../device --os "$PROFILE"
+          ./unixnu fetch --device ../device --os "$PROFILE"
+          ./unixnu tree --device ../device --os "$PROFILE"
+
+      - name: Prepare signed root tables and Data
+        env:
+          INIT_DATA: ${{ (github.event_name == 'push' && github.event.created) || inputs.init_data }}
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          args=()
+          if [ "$INIT_DATA" = true ]; then args+=(--init-data); fi
+          python3 scripts/ci/sheng_macos.py inputs --device ../device --uefi ../uefi-sheng "${args[@]}"
+
+      - name: Preserve the installation seed
+        if: steps.seed.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            UniXNU/out/sheng/macos-27.3-26C5035r/sheng_macos/runtime/data.dbr
+            UniXNU/out/sheng/macos-27.3-26C5035r/sheng_macos/runtime/ci-seed.json
+          key: ${{ steps.installation.outputs.key }}
+      - name: Upload the seed backup
+        uses: actions/upload-artifact@v4
+        with:
+          name: sheng-macos-installation-seed
+          retention-days: 1
+          if-no-files-found: error
+          path: |
+            UniXNU/out/sheng/macos-27.3-26C5035r/sheng_macos/runtime/data.dbr
+            UniXNU/out/sheng/macos-27.3-26C5035r/sheng_macos/runtime/ci-seed.json
+
+      - name: Build the sheng boot package
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          UNIXNU_UNIQUE_CHIP_ID: ${{ secrets.UNIXNU_UNIQUE_CHIP_ID }}
+        run: ./unixnu release --device ../device --uefi ../uefi-sheng --os "$PROFILE" --no-deps
+
+      - name: Assemble the complete userdata image
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: python3 scripts/ci/sheng_macos.py collect --device ../device --uefi ../uefi-sheng
+
+      - name: Compress the test package
+        run: |
+          set -euo pipefail
+          tar -C out/sheng-macos-test -cf - . | zstd -T0 -3 -o out/sheng-macos-test.tar.zst
+          (cd out && shasum -a 256 sheng-macos-test.tar.zst > sheng-macos-test.tar.zst.sha256)
+          split -b 1900m out/sheng-macos-test.tar.zst out/sheng-macos-test.tar.zst.part-
+          rm out/sheng-macos-test.tar.zst
+
+      - name: Upload the device test package
+        uses: actions/upload-artifact@v4
+        with:
+          name: sheng-macos-test-${{ github.run_id }}
+          retention-days: 1
+          compression-level: 0
+          if-no-files-found: error
+          path: |
+            UniXNU/out/sheng-macos-test.tar.zst.part-*
+            UniXNU/out/sheng-macos-test.tar.zst.sha256
+
+      - name: Collect sanitized build logs
+        if: always()
+        env:
+          SEED: ${{ secrets.UNIXNU_UNIQUE_CHIP_ID }}
+        run: |
+          python3 - <<'PY'
+          import os
+          from pathlib import Path
+          target = Path('out/public-build-logs')
+          target.mkdir(parents=True, exist_ok=True)
+          for source in (Path(os.environ['WORK']) / 'logs').glob('*.log'):
+              data = source.read_text(errors='replace')
+              if os.environ.get('SEED'):
+                  data = data.replace(os.environ['SEED'], '***')
+              (target / source.name).write_text(data)
+          PY
+      - name: Upload build logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: sheng-macos-build-logs-${{ github.run_id }}
+          retention-days: 3
+          if-no-files-found: ignore
+          path: UniXNU/out/public-build-logs/*.log
+
+      - name: Summarize the build
+        if: always()
+        env:
+          RESULT: ${{ job.status }}
+        run: |
+          {
+            echo "sheng macOS test package: $RESULT"
+            echo "Profile: $PROFILE"
+            echo 'Device: 89a9686ee45cf66ad6f873d6d6180bda966892c1'
+            echo 'UEFI: 66421cb7bb5694843aec8de1ca3d1de4c20cca38'
+            echo 'Hardware validation: pending; this workflow never flashes a device.'
+            echo 'Download the seed and test package within one day.'
+          } >> "$GITHUB_STEP_SUMMARY"
