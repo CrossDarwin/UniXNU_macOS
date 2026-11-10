@@ -44,7 +44,7 @@ IPSW extraction reports bytes, percentage, average speed and estimated remaining
 time every ten seconds. A quiet transfer reports how long it has received no new
 data. Failed HTTP requests report retries and backoff.
 
-Later runs reuse up to 5 GiB of downloaded HTTP ranges, a source archive up to
+Later runs reuse up to 2 GiB of downloaded HTTP ranges, a source archive up to
 1 GiB and a compiler-output archive up to 2 GiB. Data seeds keep their separate
 installation cache. Root image ranges require a matching URL, size and HTTP
 validator; cached blocks are hashed before use. The first downloaded ranges are
@@ -58,3 +58,14 @@ no installation seed is regenerated on a cache miss without `init_data`.
 
 These caches take effect on the next manual run and are populated by that run.
 They do not change a workflow already running.
+
+## Disk space
+
+The workflow removes unused Xcode installations and simulators while preserving
+selected Xcode. It requires at least 50 GiB free before downloading OS images
+and stops early with the available capacity if the runner is too small.
+
+After decryption, encrypted AEA copies are removed while plain images and
+verification records remain. Root preparation produces a layout and hash report;
+the final sparse image is assembled directly. Compression streams into split
+files without retaining a second complete archive.
