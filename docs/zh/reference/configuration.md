@@ -182,8 +182,6 @@ kernel_args = ["-v", "serial=3", "debug=0x14e"]
 | `tool` | 字符串 | ADT 生成器路径 |
 | `chip_id` | 字符串 | ADT 芯片 ID |
 | `owned_memory_size` | 字符串 | 连续窗口请求 |
-| `owned_memory_excluded_ranges` | 整数 | 排除区间表的大小；窗口可以跨越多段空闲内存。仅用于内核会读取该表的 OS 配置 |
-| `loader_inputs` | 布尔 | 预留记录，DarwinBoot 在其中报告载荷内存盘和 initrd 缓冲所在的位置 |
 | `root_match_volume_uuid` | 字符串 | 根卷 UUID |
 | `cpu_regs` | 字符串 | CPU MPIDR 值，逗号分隔 |
 | `psci_method` | 字符串 | `smc` 或 `hvc` |
@@ -204,7 +202,6 @@ kernel_args = ["-v", "serial=3", "debug=0x14e"]
 | `skip_setup` | 布尔 | 在新 Data 种子中把 Setup 标记为完成 |
 | `data_seed_tool` | 字符串 | 以 root 运行的种子脚本。缺少种子时构建停止并打印要运行的命令 |
 | `gpu_addon` | 布尔 | 构建 GPU addon（默认 `true`）。为 `false` 时信任包只含原始缓存 |
-| `boot_shims` | 布尔 | 把 owner `apfs_boot_util` 加入 addon，用于带 `apfs-boot-shim=1` 的 macOS |
 | `trust_components` | 数组 | 打包进 owner 信任缓存的 IPSW 信任缓存组件 |
 | `wallpapers`、`audio_tool`、`wifi_tool`、`bluetooth_tool`、`appsync` | | 加入 addon 的可选用户空间层 |
 
