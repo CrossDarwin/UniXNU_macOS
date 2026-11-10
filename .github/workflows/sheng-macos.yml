@@ -8,12 +8,6 @@ on:
         description: Create a Data seed for a NEW installation when no saved seed exists
         type: boolean
         default: false
-  push:
-    branches: [sheng/macos-actions]
-    paths:
-      - .github/workflows/sheng-macos.yml
-      - scripts/ci/sheng_macos.py
-      - scripts/ci/test_sheng_macos.py
 
 permissions:
   contents: read
@@ -32,12 +26,13 @@ env:
   HOMEBREW_NO_INSTALL_CLEANUP: '1'
   HOMEBREW_NO_ENV_HINTS: '1'
   PYTHONUNBUFFERED: '1'
+  UNIXNU_IPSW_RANGE_CACHE: ${{ github.workspace }}/UniXNU/out/ipsw-ranges
+  UNIXNU_IPSW_CACHE_MIB: '5120'
   PROFILE: macos-27.3-26C5035r
   WORK: out/sheng/macos-27.3-26C5035r/sheng_macos
 
 jobs:
   package:
-    if: github.event_name != 'push' || github.event.created
     runs-on: xcode-27
     timeout-minutes: 360
     steps:
@@ -79,6 +74,7 @@ jobs:
           xcodebuild -version
           xcrun --sdk iphoneos --show-sdk-version
           python3 -m unittest discover -s scripts/ci -p 'test_*.py' -v
+          PYTHONPATH=scripts python3 -m unittest unixnu.test_ipsw_progress -v
           df -h .
 
       - name: Install build tools
@@ -107,6 +103,25 @@ jobs:
           with open(os.environ['GITHUB_OUTPUT'], 'a') as output:
               output.write(f'key=sheng-macos-data-v1-{os.environ["PROFILE"]}-{identity}\n')
           PY
+      - name: Resolve reusable input identities
+        id: cache-key
+        run: python3 scripts/ci/build_cache.py identity --github-output "$GITHUB_OUTPUT"
+      - name: Restore downloaded IPSW ranges
+        id: ranges
+        uses: actions/cache/restore@v4
+        with:
+          path: UniXNU/out/ipsw-ranges/**/*.block
+          key: sheng-ipsw-ranges-v1-${{ env.PROFILE }}-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: sheng-ipsw-ranges-v1-${{ env.PROFILE }}-
+      - name: Restore source cache
+        id: sources
+        uses: actions/cache/restore@v4
+        with:
+          path: UniXNU/out/ci-cache/sources.tar.zst
+          key: sheng-sources-v1-${{ steps.cache-key.outputs.sources }}-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: sheng-sources-v1-${{ steps.cache-key.outputs.sources }}-
+      - name: Unpack cached sources
+        run: python3 scripts/ci/build_cache.py unpack --archive out/ci-cache/sources.tar.zst
       - uses: actions/cache/restore@v4
         id: seed
         with:
@@ -126,7 +141,7 @@ jobs:
 
       - name: Prepare signed root tables and Data
         env:
-          INIT_DATA: ${{ (github.event_name == 'push' && github.event.created) || inputs.init_data }}
+          INIT_DATA: ${{ inputs.init_data }}
           GITHUB_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
@@ -151,6 +166,15 @@ jobs:
           path: |
             UniXNU/out/sheng/macos-27.3-26C5035r/sheng_macos/runtime/data.dbr
             UniXNU/out/sheng/macos-27.3-26C5035r/sheng_macos/runtime/ci-seed.json
+
+      - name: Restore compiler outputs
+        uses: actions/cache/restore@v4
+        with:
+          path: UniXNU/out/ci-cache/build.tar.zst
+          key: sheng-build-v1-${{ steps.cache-key.outputs.build }}-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: sheng-build-v1-${{ steps.cache-key.outputs.build }}-
+      - name: Unpack compiler outputs
+        run: python3 scripts/ci/build_cache.py unpack --archive out/ci-cache/build.tar.zst
 
       - name: Build the sheng boot package
         env:
@@ -198,6 +222,30 @@ jobs:
                   data = data.replace(os.environ['SEED'], '***')
               (target / source.name).write_text(data)
           PY
+      - name: Pack bounded reusable inputs
+        if: always() && steps.cache-key.outcome == 'success'
+        continue-on-error: true
+        run: |
+          python3 scripts/ci/build_cache.py pack --kind sources --archive out/ci-cache/sources.tar.zst
+          python3 scripts/ci/build_cache.py pack --kind build --archive out/ci-cache/build.tar.zst
+      - name: Save downloaded IPSW ranges
+        if: always() && hashFiles('UniXNU/out/ipsw-ranges/**/*.block') != ''
+        uses: actions/cache/save@v4
+        with:
+          path: UniXNU/out/ipsw-ranges/**/*.block
+          key: sheng-ipsw-ranges-v1-${{ env.PROFILE }}-${{ github.run_id }}-${{ github.run_attempt }}
+      - name: Save source cache
+        if: always() && steps.cache-key.outcome == 'success' && hashFiles('UniXNU/out/ci-cache/sources.tar.zst') != ''
+        uses: actions/cache/save@v4
+        with:
+          path: UniXNU/out/ci-cache/sources.tar.zst
+          key: sheng-sources-v1-${{ steps.cache-key.outputs.sources }}-${{ github.run_id }}-${{ github.run_attempt }}
+      - name: Save compiler outputs
+        if: always() && steps.cache-key.outcome == 'success' && hashFiles('UniXNU/out/ci-cache/build.tar.zst') != ''
+        uses: actions/cache/save@v4
+        with:
+          path: UniXNU/out/ci-cache/build.tar.zst
+          key: sheng-build-v1-${{ steps.cache-key.outputs.build }}-${{ github.run_id }}-${{ github.run_attempt }}
       - name: Upload build logs
         if: always()
         uses: actions/upload-artifact@v4

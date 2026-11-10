@@ -10,10 +10,12 @@ chip_id, board_id, and the components the steps use.
 import hashlib
 import io
 import json
+import os
 import platform
 import plistlib
 import struct
 import subprocess
+import tempfile
 import time
 import urllib.error
 import urllib.request
@@ -21,8 +23,46 @@ import zipfile
 from pathlib import Path
 
 from .util import Error, expand, log, lzfse, sha256_file, tool
+from .progress import Progress
 
 CHUNK = 8 << 20
+
+
+class RangeDiskCache:
+    """Keep the first downloaded ranges within a fixed budget across runner restarts."""
+    def __init__(self, root, identity, limit):
+        self.root, self.limit = Path(root), limit
+        self.directory = self.root / hashlib.sha256(identity.encode()).hexdigest()
+        self.directory.mkdir(parents=True, exist_ok=True)
+        self.used = sum(path.stat().st_size for path in self.root.glob('*/*.block'))
+
+    def get(self, start, size):
+        path = self.directory / f'{start:016x}.block'
+        if not path.is_file():
+            return None
+        data = path.read_bytes()
+        if len(data) == size + 32 and hashlib.sha256(data[32:]).digest() == data[:32]:
+            return data[32:]
+        self.used -= len(data)
+        path.unlink()
+        log(f'ipsw range cache: discarded corrupt block at {start:#x}')
+        return None
+
+    def put(self, start, data):
+        path = self.directory / f'{start:016x}.block'
+        if path.exists() or self.used + len(data) + 32 > self.limit:
+            return
+        temporary = None
+        try:
+            with tempfile.NamedTemporaryFile(dir=self.directory, suffix='.partial', delete=False) as output:
+                temporary = Path(output.name)
+                output.write(hashlib.sha256(data).digest())
+                output.write(data)
+            temporary.replace(path)
+            self.used += len(data) + 32
+        finally:
+            if temporary is not None:
+                temporary.unlink(missing_ok=True)
 
 
 class RangeFile(io.RawIOBase):
@@ -32,9 +72,18 @@ class RangeFile(io.RawIOBase):
         self.url, self.block, self.retries = url, block, retries
         self.position = 0
         self.cache = {}
+        self.downloaded = self.reused = 0
         request = urllib.request.Request(url, method='HEAD')
         with urllib.request.urlopen(request, timeout=60) as response:
             self.size = int(response.headers['Content-Length'])
+            validator = response.headers.get('ETag') or response.headers.get('Last-Modified')
+        self.disk_cache = None
+        directory = os.environ.get('UNIXNU_IPSW_RANGE_CACHE')
+        if directory and validator:
+            limit = int(os.environ.get('UNIXNU_IPSW_CACHE_MIB', '5120')) * 2**20
+            if limit < 0:
+                raise Error('UNIXNU_IPSW_CACHE_MIB must not be negative')
+            self.disk_cache = RangeDiskCache(directory, f'{url}\n{self.size}\n{validator}', limit)
         probe = urllib.request.Request(url, headers={'Range': 'bytes=0-0'})
         with urllib.request.urlopen(probe, timeout=60) as response:
             if response.status != 206:
@@ -59,18 +108,30 @@ class RangeFile(io.RawIOBase):
                 self.cache.pop(next(iter(self.cache)))
             start = index * self.block
             end = min(start + self.block, self.size) - 1
+            cached = self.disk_cache.get(start, end - start + 1) if self.disk_cache else None
+            if cached is not None:
+                self.cache[index] = cached
+                self.reused += len(cached)
+                return cached
             for attempt in range(self.retries):
                 try:
                     request = urllib.request.Request(self.url, headers={'Range': f'bytes={start}-{end}'})
                     with urllib.request.urlopen(request, timeout=120) as response:
+                        if response.status != 206:
+                            raise OSError('range request did not return HTTP 206')
                         data = response.read()
                     if len(data) != end - start + 1:
                         raise OSError('short range response')
                     self.cache[index] = data
+                    self.downloaded += len(data)
+                    if self.disk_cache:
+                        self.disk_cache.put(start, data)
                     break
-                except (OSError, urllib.error.URLError):
+                except (OSError, urllib.error.URLError) as error:
                     if attempt == self.retries - 1:
                         raise
+                    log(f'ipsw: retry {attempt + 1}/{self.retries - 1} at byte {start} - {type(error).__name__}'
+                        f' - backoff {2 ** attempt}s')
                     time.sleep(2 ** attempt)
         return self.cache[index]
 
@@ -146,16 +207,18 @@ class Ipsw:
         record = destination.with_suffix(destination.suffix + '.json')
         if destination.is_file() and destination.stat().st_size == size:
             if pin is None or (record.is_file() and json.loads(record.read_text()).get('sha256') == pin) or sha256_file(destination) == pin:
+                log(f'ipsw: cache hit {component} ({size >> 20} MiB)')
                 return destination
             destination.unlink()
         self.cache.mkdir(parents=True, exist_ok=True)
         partial = destination.with_suffix(destination.suffix + '.partial')
         digest = hashlib.sha256()
         log(f'ipsw: extracting {component} ({name}, {size >> 20} MiB)')
-        with self.zip.open(name) as source, partial.open('wb') as target:
+        with Progress(f'ipsw {component}', size) as progress, self.zip.open(name) as source, partial.open('wb') as target:
             while chunk := source.read(CHUNK):
                 target.write(chunk)
                 digest.update(chunk)
+                progress.advance(len(chunk))
         if partial.stat().st_size != size:
             partial.unlink()
             raise Error(f'incomplete extraction of {name}')
@@ -163,6 +226,9 @@ class Ipsw:
             partial.unlink()
             raise Error(f'{name} differs from the pinned sha256 of board.toml [ipsw.sha256]: {digest.hexdigest()}')
         partial.rename(destination)
+        if self.remote:
+            log(f'ipsw transfer totals: {self.stream.downloaded / 2**20:.1f} MiB downloaded'
+                f' - {self.stream.reused / 2**20:.1f} MiB reused from range cache')
         record.write_text(json.dumps({'component': component, 'member': name, 'size': size, 'sha256': digest.hexdigest(),
                                       'source': 'remote' if self.remote else 'local'}, indent=2) + '\n')
         return destination
