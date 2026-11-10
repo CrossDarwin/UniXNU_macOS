@@ -240,18 +240,7 @@ jobs:
         if: always()
         env:
           SEED: ${{ secrets.UNIXNU_UNIQUE_CHIP_ID }}
-        run: |
-          python3 - <<'PY'
-          import os
-          from pathlib import Path
-          target = Path('out/public-build-logs')
-          target.mkdir(parents=True, exist_ok=True)
-          for source in (Path(os.environ['WORK']) / 'logs').glob('*.log'):
-              data = source.read_text(errors='replace')
-              if os.environ.get('SEED'):
-                  data = data.replace(os.environ['SEED'], '***')
-              (target / source.name).write_text(data)
-          PY
+        run: python3 scripts/ci/build_logs.py --work "$WORK" --device ../device --output out/public-build-logs
       - name: Pack bounded reusable inputs
         if: always() && steps.cache-key.outcome == 'success'
         continue-on-error: true
@@ -283,7 +272,7 @@ jobs:
           name: sheng-macos-build-logs-${{ github.run_id }}
           retention-days: 3
           if-no-files-found: ignore
-          path: UniXNU/out/public-build-logs/*.log
+          path: UniXNU/out/public-build-logs/**/*.log
 
       - name: Summarize the build
         if: always()
