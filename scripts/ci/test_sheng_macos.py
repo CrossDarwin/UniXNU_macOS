@@ -2,6 +2,7 @@
 import hashlib
 import importlib.util
 import io
+import json
 from pathlib import Path
 import struct
 import subprocess
@@ -14,6 +15,60 @@ from unittest.mock import patch
 spec = importlib.util.spec_from_file_location('sheng_macos_ci', Path(__file__).with_name('sheng_macos.py'))
 ci = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(ci)
+
+
+class CollectionCleanupTests(unittest.TestCase):
+    def test_local_collection_keeps_the_reusable_image(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            image = root/'ipsw/OS.dmg'
+            image.parent.mkdir()
+            image.write_bytes(b'preserved')
+            with patch.dict(ci.os.environ, {'GITHUB_ACTIONS': 'false'}):
+                ci.reclaim_collected_images(SimpleNamespace(out_root=root), [{'image': str(image)}])
+            self.assertTrue(image.exists())
+
+    def test_failed_package_copy_preserves_source_images_on_ci(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            work = root/'work'
+            layout = work/'userdata'
+            layout.mkdir(parents=True)
+            image = root/'ipsw/OS.dmg'
+            image.parent.mkdir()
+            image.write_bytes(b'reusable OS image')
+            inputs = {'windows': [{'image': str(image)}], 'partition_bytes': 4096, 'objects': []}
+            (layout/'ci-inputs.json').write_text(json.dumps(inputs))
+            (layout/'userdata-root.json').write_text(json.dumps({'image_bytes': 4096}))
+            destination = root/'package'
+            def make_sparse(command, **kwargs):
+                (destination/'userdata-full.img').write_bytes(
+                    struct.pack('<IHHHHIIII', 0xED26FF3A, 1, 0, 28, 12, 4096, 1, 1, 0))
+            ctx = SimpleNamespace(work=work, out_root=root, device=root/'device')
+            with patch.dict(ci.os.environ, {'GITHUB_ACTIONS': 'true'}), \
+                    patch.object(ci.shutil, 'disk_usage', return_value=SimpleNamespace(free=100*2**30)), \
+                    patch.object(ci.subprocess, 'run', side_effect=make_sparse):
+                with self.assertRaisesRegex(ValueError, 'Missing build product'):
+                    ci.collect(ctx, destination)
+            self.assertEqual(image.read_bytes(), b'reusable OS image')
+            self.assertTrue((destination/'userdata-full.img').exists())
+
+    def test_ci_validates_all_paths_before_releasing_any_image(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            image = root/'ipsw/OS.dmg'
+            image.parent.mkdir()
+            image.write_bytes(b'preserved')
+            outside = root/'outside.dmg'
+            outside.write_bytes(b'outside')
+            with patch.dict(ci.os.environ, {'GITHUB_ACTIONS': 'true'}):
+                with self.assertRaisesRegex(ValueError, 'outside the build cache'):
+                    ci.reclaim_collected_images(SimpleNamespace(out_root=root),
+                        [{'image': str(image)}, {'image': str(outside)}])
+                self.assertTrue(image.exists())
+                ci.reclaim_collected_images(SimpleNamespace(out_root=root), [{'image': str(image)}])
+            self.assertFalse(image.exists())
+            self.assertTrue(outside.exists())
 
 
 class BuildInputTests(unittest.TestCase):

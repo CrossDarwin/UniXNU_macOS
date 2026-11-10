@@ -103,3 +103,8 @@ After decryption, encrypted AEA copies are removed while plain images and
 verification records remain. Root preparation produces a layout and hash report;
 the final sparse image is assembled directly. Compression streams into split
 files without retaining a second complete archive.
+
+The collector releases plain OS images only on Actions, after all package files,
+revision records and checksums have been written. Local collection retains these
+images for rebuilds. A failed collection retains its source images and compiled
+outputs. The diagnostic disk reserve is released even when a step fails.

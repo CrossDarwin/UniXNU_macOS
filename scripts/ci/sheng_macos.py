@@ -249,6 +249,20 @@ def prepare_inputs(ctx, init_data: bool) -> None:
               'data_bytes': data_bytes, 'log_reserve_bytes': reserve, 'verified_policies': checks})
 
 
+def reclaim_collected_images(ctx, windows) -> None:
+    """Only ephemeral CI releases OS images after every package output is complete."""
+    if os.environ.get('GITHUB_ACTIONS') != 'true':
+        return
+    cache = (ctx.out_root / 'ipsw').resolve()
+    images = [Path(window['image']) for window in windows]
+    for image in images:
+        require(not image.is_symlink() and image.resolve().is_relative_to(cache),
+                'Refuse to remove an image outside the build cache')
+    for image in images:
+        image.unlink(missing_ok=True)
+        print(f'Released packaged CI image: {image}', flush=True)
+
+
 def collect(ctx, destination: Path) -> None:
     from unixnu.util import sha256_file
     rootdir = ctx.work / 'userdata'
@@ -273,12 +287,6 @@ def collect(ctx, destination: Path) -> None:
     require((magic, major, minor, file_header, chunk_header, block) == (0xED26FF3A, 1, 0, 28, 12, BLOCK),
             'Unexpected Android sparse header')
     require(count * block == inputs['partition_bytes'] and chunks > 0 and checksum == 0, 'Sparse geometry mismatch')
-    # No later build step needs the mounted OS images; retain their identity records.
-    image_cache = (ctx.out_root / 'ipsw').resolve()
-    for window in inputs['windows']:
-        image = Path(window['image']).resolve()
-        require(image.is_relative_to(image_cache), 'Refuse to remove an image outside the build cache')
-        image.unlink()
     files = {'boot.img': ctx.work / 'boot/boot.img', 'payload.img': ctx.work / 'payload/payload.img',
              'kernel.macho': ctx.work / 'kernel/kernel.macho', 'package.manifest.json': ctx.work / 'package.manifest.json',
              'userdata-root.json': rootdir / 'userdata-root.json', 'data.dbr': ctx.work / 'runtime/data.dbr',
@@ -301,6 +309,7 @@ def collect(ctx, destination: Path) -> None:
     checksums = [f'{sha256_file(path)}  {path.name}' for path in sorted(destination.iterdir()) if path.is_file()]
     (destination / 'SHA256SUMS').write_text('\n'.join(checksums) + '\n')
     print(f'Test package: {destination}', flush=True)
+    reclaim_collected_images(ctx, inputs['windows'])
 
 
 def main() -> None:
