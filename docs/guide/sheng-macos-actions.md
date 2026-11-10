@@ -19,6 +19,15 @@ File sizes and SHA-256 hashes must match the device's `firmware/wcn7850/manifest
 Verified files are reused from the source cache. The test package includes
 `WCN7850-Notice.txt`.
 
+The workflow also fetches the Wi-Fi component's locked Linux, FreeBSD and
+supplicant sources before preparing OS images. Its upstream source verifier
+checks the revisions and archive hash. These dependencies join the bounded source
+cache, keyed by the Wi-Fi component revision, and are checked after restoration.
+
+Before downloading OS images, the workflow checks runtime and archive build
+scripts, firmware packaging files, kernel argument length and the preserved Data
+seed. Missing or changed inputs stop preparation before the large downloads.
+
 The workflow verifies every original root block with VerifiedRoot, generates
 the signed policy handoff and builds the kernel, firmware and payload. The
 userdata image includes the OS, SystemOS and App windows, policy hash tables,
@@ -72,6 +81,9 @@ percentage and elapsed time. Runtime preparation prints each executed command.
 After ten seconds without output, the log name, elapsed and quiet times, log size
 and free disk space are reported. A quiet notice means the subprocess has not
 exited; it does not establish progress or a hang. Raw logs remain on disk.
+
+The build-log artifact includes the driver logs and nested Mesa, Metal and Wi-Fi
+logs. Platform-seed values are redacted from the uploaded text.
 
 ## Disk space
 
