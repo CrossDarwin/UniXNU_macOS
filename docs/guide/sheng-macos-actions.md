@@ -4,6 +4,10 @@ The `sheng macOS test package` workflow builds macOS 27.3 (`26C5035r`) for the
 256 GB sheng layout. It runs on the `xcode-27` ARM64 macOS runner and pins the
 device and UEFI repositories in the workflow.
 
+The workflow selects compatible SM8550 and USB revisions. `scripts/ci/sheng_sources.py`
+records the SoC override in the device's `local.toml`; the USB checkout has its own
+fixed revision. Both revisions enter the cache identity and `test-package.json`.
+
 ## Run
 
 Set the repository Actions secret `UNIXNU_UNIQUE_CHIP_ID` to the installation's
@@ -23,6 +27,10 @@ The workflow also fetches the Wi-Fi component's locked Linux, FreeBSD and
 supplicant sources before preparing OS images. Its upstream source verifier
 checks the revisions and archive hash. These dependencies join the bounded source
 cache, keyed by the Wi-Fi component revision, and are checked after restoration.
+
+Bluetooth's locked Linux sources are fetched and hash-verified before image
+preparation. The preflight also checks the UART, DMA, USB and selected ABI input
+files. Restored Bluetooth sources are verified against the component lock.
 
 Before downloading OS images, the workflow checks runtime and archive build
 scripts, firmware packaging files, kernel argument length and the preserved Data

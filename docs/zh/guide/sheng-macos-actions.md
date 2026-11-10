@@ -3,6 +3,10 @@
 `sheng macOS test package` 工作流为 256 GB sheng 构建 macOS 27.3（`26C5035r`）。
 工作流使用 `xcode-27` ARM64 macOS runner，设备与 UEFI 仓库固定到指定提交。
 
+工作流选用配套的 SM8550 和 USB 版本。`scripts/ci/sheng_sources.py` 将 SoC 覆盖
+写入设备的 `local.toml`，USB 单独检出固定提交。两个版本均纳入缓存标识和
+`test-package.json`。
+
 ## 构建
 
 在仓库 Actions Secrets 中设置 `UNIXNU_UNIQUE_CHIP_ID`，值为本次安装使用的
@@ -18,6 +22,9 @@
 工作流同时提前获取 Wi-Fi 组件锁定的 Linux、FreeBSD 和 supplicant 源码，
 调用组件自带的校验器检查提交版本和源码包哈希。这些依赖加入有容量上限的源码缓存，
 缓存按 Wi-Fi 组件版本区分，恢复后重新校验。
+
+蓝牙锁定的 Linux 源码也在准备镜像前下载并校验哈希。前置检查同时核对 UART、
+DMA、USB 及所选 ABI 输入文件。恢复的蓝牙源码按组件锁定记录重新校验。
 
 下载系统镜像前，工作流检查运行环境和内核归档的构建脚本、固件打包文件、
 内核参数长度及保留的 Data 种子。缺少输入或种子校验失败时提前结束。
