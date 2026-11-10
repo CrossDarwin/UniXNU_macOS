@@ -160,6 +160,23 @@ def check_build_inputs(ctx) -> None:
                  ctx.board['firmware']['dsc'], f'Resources/Configs/{ctx.board["firmware"]["config"]}.toml'))
     missing = [str(path) for path in paths if not path.is_file()]
     require(not missing, 'Missing build inputs before image preparation:\n' + '\n'.join(missing))
+    if runtime.get('wifi_tool'):
+        firmware = ctx.device / 'firmware/wcn7850'
+        require((firmware / 'manifest.json').is_file(), f'Missing WCN7850 manifest: {firmware}')
+        manifest = json.loads((firmware / 'manifest.json').read_text())['files']
+        require({'amss.bin', 'm3.bin', 'board-2.bin'} <= manifest.keys(),
+                'WCN7850 manifest lacks required firmware')
+        invalid = []
+        for name, expected in manifest.items():
+            require(name in ('amss.bin', 'amss2.bin', 'm3.bin', 'board-2.bin'),
+                    'Unsupported WCN7850 firmware name')
+            path = firmware / name
+            if (not path.is_file() or path.stat().st_size != expected['bytes'] or
+                    hashlib.sha256(path.read_bytes()).hexdigest() != expected['sha256']):
+                invalid.append(name)
+        require(not invalid, 'Missing or invalid WCN7850 inputs: ' + ', '.join(invalid) +
+                f' - Restore the manifest-matching files under {firmware}')
+        print(f'Wi-Fi firmware verified: {len(manifest)} pinned files', flush=True)
     if ctx.schema_version == 2:
         from sheng_sources import check
         check(ctx)

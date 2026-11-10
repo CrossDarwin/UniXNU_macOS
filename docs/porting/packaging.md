@@ -36,6 +36,11 @@ same script text. A board changes `board.toml`, never the script.
 | `pack` | Packs the boot image from the firmware volume, the device tree and the payload | `[bootimg]`, `[device_tree]` |
 | `verify` | Writes the manifest and checks the outputs against it | the outputs |
 
+sheng verifies each retained stock firmware file against its extraction manifest
+before reusing the cache. Missing or corrupt files trigger preparation again.
+UEFI import also checks generated files, and preflight stops on missing vendor
+modules. macOS input checks validate the pinned WCN7850 files before image preparation.
+
 ## Interface
 
 ```sh

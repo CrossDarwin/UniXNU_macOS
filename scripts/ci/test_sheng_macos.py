@@ -86,6 +86,14 @@ class BuildInputTests(unittest.TestCase):
                 path = base / name
                 path.parent.mkdir(parents=True, exist_ok=True)
                 path.write_text('input')
+        firmware = device / 'firmware/wcn7850'
+        firmware.mkdir(parents=True)
+        files = {}
+        for name in ('amss.bin', 'm3.bin', 'board-2.bin'):
+            data = name.encode()
+            (firmware / name).write_bytes(data)
+            files[name] = {'bytes': len(data), 'sha256': hashlib.sha256(data).hexdigest()}
+        (firmware / 'manifest.json').write_text(json.dumps({'files': files}))
         return SimpleNamespace(tree=tree, device=device, args=SimpleNamespace(uefi=uefi),
                                schema_version=1, board=board, work=root / 'work')
 
@@ -96,6 +104,23 @@ class BuildInputTests(unittest.TestCase):
             (ctx.device / 'scripts/wifi.py').unlink()
             with patch('unixnu.ipsw.Ipsw', side_effect=AssertionError('must fail before image access')):
                 with self.assertRaisesRegex(ValueError, 'scripts/wifi.py'):
+                    ci.prepare_inputs(ctx, False)
+
+    def test_missing_wifi_firmware_fails_before_image_access(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            ctx = self.context(Path(temporary))
+            (ctx.device / 'firmware/wcn7850/amss.bin').unlink()
+            with patch('unixnu.ipsw.Ipsw', side_effect=AssertionError('image access')):
+                with self.assertRaisesRegex(ValueError, 'Missing or invalid WCN7850 inputs: amss.bin'):
+                    ci.prepare_inputs(ctx, False)
+
+    def test_same_size_wifi_corruption_fails_before_image_access(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            ctx = self.context(Path(temporary))
+            path = ctx.device / 'firmware/wcn7850/amss.bin'
+            path.write_bytes(b'X' * path.stat().st_size)
+            with patch('unixnu.ipsw.Ipsw', side_effect=AssertionError('image access')):
+                with self.assertRaisesRegex(ValueError, 'Missing or invalid WCN7850 inputs: amss.bin'):
                     ci.prepare_inputs(ctx, False)
 
     def test_seed_cache_miss_fails_before_image_access(self):

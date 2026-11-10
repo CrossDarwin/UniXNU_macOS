@@ -52,7 +52,9 @@ IDs and contact count as one coherent frame for the HID consumer.
 
 The Novatek processing core uses a 40 × 60 matrix. Verify geometry and bounds
 when adapting its firmware or processing core. Firmware extraction is owned by
-the device's `scripts/gen-touch-firmware.py` and proprietary-file inventory.
+the device's `scripts/extract-files.py` and proprietary-file inventory. sheng's
+Legacy display build fetches and verifies keyboard and touch firmware before
+compilation and reuses matching cached files.
 
 The reference probe arguments `touch=1`, `2`, `3` and `4` select resource inspection, clocks/pins,
 controller identification, then firmware/scanning. Use those stages only after
