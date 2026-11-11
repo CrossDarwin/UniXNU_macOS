@@ -187,6 +187,8 @@ def cmd_bootimg(ctx):
     uefi = need_uefi(ctx)
     fd = expand(ctx.args.fd) if ctx.args.fd else firmware.fd_path(ctx, uefi, ctx.args.target)
     dtb = ctx.option('dtb', 'UNIXNU_DTB')
+    if dtb is None and ctx.board.get('bootimg', {}).get('dtb'):
+        dtb = ctx.tree / ctx.board['bootimg']['dtb']
     ramdisk = None
     if ctx.args.ramdisk and ctx.args.ramdisk != 'none':
         ramdisk = expand(ctx.args.ramdisk)
