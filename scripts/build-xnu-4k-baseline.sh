@@ -207,11 +207,15 @@ else
   PERSONALITY_CFLAGS=
 fi
 if [ "${XNU_NATIVE_VIRTIO_BLOCK:-0}" = 1 ]; then
-  if [ "${XNU_NATIVE_AES:-0}" != 1 ]; then
+  if [ "${XNU_NATIVE_AES:-0}" != 1 ] && [ "${XNU_SOURCE_STORAGE:-0}" != 1 ]; then
     echo 'NativeVirtioBlock currently requires the qualified NativeAES/original-storage prelink baseline' >&2
     exit 1
   fi
-  PERSONALITY_CFLAGS="$PERSONALITY_CFLAGS -DXNU_NATIVE_VIRTIO_BLOCK=1"
+  if [ "${XNU_SOURCE_STORAGE:-0}" = 1 ]; then
+    PERSONALITY_CFLAGS="$PERSONALITY_CFLAGS -DXNU_NATIVE_VIRTIO_BLOCK=0"
+  else
+    PERSONALITY_CFLAGS="$PERSONALITY_CFLAGS -DXNU_NATIVE_VIRTIO_BLOCK=1"
+  fi
 fi
 NATIVE_RAM_BLOCK=${XNU_NATIVE_RAM_BLOCK:-0}
 if [ "$NATIVE_RAM_BLOCK" != 0 ] && [ "$NATIVE_RAM_BLOCK" != 1 ]; then

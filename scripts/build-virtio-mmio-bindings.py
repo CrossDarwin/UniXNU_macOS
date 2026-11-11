@@ -3,6 +3,7 @@
 import argparse
 import hashlib
 import json
+import os
 from pathlib import Path
 import re
 import struct
@@ -18,6 +19,17 @@ parser = argparse.ArgumentParser(description=__doc__)
 parser.add_argument('--component', choices=['VirtioMmioBlock', 'RamBlock', 'NativeVirtioBlock', 'NativeRamBlock'], default='VirtioMmioBlock')
 parser.add_argument('--directory', type=Path, default=ROOT / 'build/virtio-mmio-block')
 args = parser.parse_args()
+if args.component in ('VirtioMmioBlock', 'NativeVirtioBlock') and os.environ.get('UNIXNU_APFS_CONTAINER'):
+    # The APFS build uses the source IOStorageFamily ABI and links its own base.
+    from kernel_target import check_object
+    out = args.directory.resolve()
+    obj = out / 'NativeVirtioBlock.o'
+    check_object(obj.read_bytes(), 'NativeVirtioBlock')
+    archive = out / 'libVirtioMmioBlock.a'
+    archive.unlink(missing_ok=True)
+    subprocess.run(['xcrun', 'ar', 'rcs', archive, obj], check=True)
+    print('Native APFS VirtIO - source IOStorageFamily bindings')
+    raise SystemExit(0)
 out = args.directory.resolve()
 audit = json.loads((ROOT / 'build/storage-abi/interface-audit.json').read_text())
 canonical = {'NativeVirtioBlock': 'VirtioMmioBlock', 'NativeRamBlock': 'RamBlock'}.get(args.component, args.component)

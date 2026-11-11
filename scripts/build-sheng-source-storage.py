@@ -205,18 +205,32 @@ OSDefineOperatorMethods(IOBlockStorageDevice)
         ufs_source = adapter.stage(ufs_source.parent.resolve(),
                                    out / ('apfs-' + str(os.getpid())), Path(apfs_receipt).resolve())
     root_binding = device_source('SourceRootBinding.cpp')
-    storage_source = device_source('SourceStorage.cpp')
     if apfs_receipt:
         binding = root_binding.read_text()
-        binding += (ROOT / 'scripts/sheng-apfs/auxiliary-store.inc').read_text()
+        binding = binding.replace('extern "C" {', 'extern "C" {\nint (*native_apfs_virtio_identity)(IOService *, const char *, uint8_t *) = nullptr;', 1)
+        needle = 'const int ufs = native_ufs_block_authenticates(provider, uuid->getCStringNoCopy(), manifestDigest);'
+        if binding.count(needle) != 1:
+            parser.error('The root provider query changed')
+        binding = binding.replace(needle, 'int ufs = native_ufs_block_authenticates(provider, uuid->getCStringNoCopy(), manifestDigest);\n'
+                                  '            if (ufs < 0 && native_apfs_virtio_identity)\n'
+                                  '                ufs = native_apfs_virtio_identity(provider, uuid->getCStringNoCopy(), manifestDigest);')
         root_binding = out / 'NativeApfsRootBinding.cpp'
+        binding += (ROOT / 'scripts/sheng-apfs/auxiliary-store.inc').read_text()
         root_binding.write_text(binding)
+    storage_source = device_source('SourceStorage.cpp')
+    if apfs_receipt:
         storage = storage_source.read_text()
-        storage = 'extern "C" void native_apfs_auxiliary_store_init(void);\n' + storage
+        declaration = 'extern "C" void source_storage_virtio_init(void) __asm__("__GLOBAL__sub_I_NativeVirtioBlock.cpp");\n'
+        storage = '#include <libkern/c++/OSIterator.h>\n' + declaration + storage
+        storage = 'extern \"C\" void native_apfs_auxiliary_store_init(void);\n' + storage
         registration = '    source_storage_ram_init();'
         if storage.count(registration) != 1:
             parser.error('The source storage registration changed')
-        storage = storage.replace(registration, registration + '\n    native_apfs_auxiliary_store_init();')
+        storage = storage.replace(registration, registration + '\n    source_storage_virtio_init();\n    native_apfs_auxiliary_store_init();')
+        start = '    OSDictionary *matching = IOService::serviceMatching("IOPlatformExpertDevice");'
+        if storage.count(start) != 1:
+            parser.error('The source storage startup changed')
+        storage = storage.replace(start, (ROOT / 'scripts/sheng-apfs/virtio-start.inc').read_text() + start)
         storage_source = out / 'SourceStorage.cpp'
         storage_source.write_text(storage)
     # The RAM disk carries the Data seed in the legacy layout.

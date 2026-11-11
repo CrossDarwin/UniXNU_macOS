@@ -2,6 +2,9 @@
 """Compile the generic platform expert against the actual source-kernel ABI."""
 import argparse
 import json
+import os
+import shutil
+import importlib.util
 import tomllib
 from pathlib import Path
 import subprocess
@@ -66,6 +69,12 @@ if args.negative_aes_kat:
     (out / 'OriginalAESABI.h').write_bytes(source.with_name('OriginalAESABI.h').read_bytes())
     source = out / 'NativeAES.cpp'
     source.write_text(text.replace(marker, '0x77,0x49,0xab,0xac'))
+if identifier == 'VirtioMmioBlock' and os.environ.get('UNIXNU_APFS_CONTAINER'):
+    spec = importlib.util.spec_from_file_location('apfs_virtio_stage', ROOT / 'scripts/sheng-apfs/stage-virtio.py')
+    adapter = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(adapter)
+    source = adapter.stage(source.parent, out / 'apfs', Path(os.environ['UNIXNU_APFS_CONTAINER']))
+
 destination = out / (component + '.o')
 arguments = record['arguments']
 command = []
@@ -85,6 +94,12 @@ while index < len(arguments):
 command.extend(['-Wall', '-Wextra', '-Werror', '-Wno-unused-parameter',
                 '-Wno-c99-designator', '-Wno-reorder-init-list', '-Wno-deprecated-enum-enum-conversion',
                 '-Wno-unnecessary-virtual-specifier', '-I', str(ROOT / '.cache/xnu-work/osfmk')])
+if identifier == 'VirtioMmioBlock' and os.environ.get('UNIXNU_APFS_CONTAINER'):
+    storage = ROOT / 'build/sheng-source-storage'
+    command[1:1] = ['-I', str(storage / 'headers/include')]
+    if os.environ.get('UNIXNU_XNU_TARGET') == 'macosx':
+        command += ['-include', str(storage / 'macos-target.h')]
+
 if component in ('NativeVirtioBlock', 'NativeRamBlock', 'NativeUfs'):
     command += ['-I', str(ROOT / 'build/storage-abi/include')]
     if args.verified_root:
@@ -110,6 +125,14 @@ result = subprocess.run(command, cwd=record['directory'], stdout=subprocess.PIPE
 if result.returncode:
     raise SystemExit(result.stdout[-3500:])
 check_object(destination.read_bytes(), component)
+if identifier == 'VirtioMmioBlock' and os.environ.get('UNIXNU_APFS_CONTAINER'):
+    objcopy = shutil.which('llvm-objcopy')
+    if not objcopy:
+        raise SystemExit('llvm-objcopy is required for deferred storage registration')
+    late = destination.with_suffix('.late.o')
+    subprocess.run([objcopy, '--remove-section=__DATA,__mod_init_func',
+                    '--globalize-symbol=__GLOBAL__sub_I_NativeVirtioBlock.cpp', destination, late], check=True)
+    late.replace(destination)
 archive = out / ('lib' + identifier + '.a')
 archive.unlink(missing_ok=True)
 subprocess.run(['xcrun', 'ar', 'rcs', archive, destination], check=True)

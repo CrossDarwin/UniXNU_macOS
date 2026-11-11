@@ -191,6 +191,8 @@ def build(ctx, modules):
         tool('xcodebuild', 'the kernel step builds with the Xcode iphoneos SDK')
     env.update(xnu_env(ctx))
     env.update(version_env(modules, ctx))
+    if os.environ.get('UNIXNU_APFS_CONTAINER'):
+        env['XNU_NATIVE_VIRTIO_BLOCK'] = '1'
     if ctx.schema_version == 2:
         env['UNIXNU_PATCH_LIST'] = str(patches.prepare(ctx, modules))
         generated = ctx.tree / 'build/generated'
