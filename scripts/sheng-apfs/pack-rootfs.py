@@ -10,7 +10,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path('tools/sheng-apfs').resolve()))
-from image import export, geometry
+from image import export, geometry, hash_image
 
 
 def pack(input_dir, output, partition_bytes, raw_only, link_raw=False):
@@ -31,7 +31,7 @@ def pack(input_dir, output, partition_bytes, raw_only, link_raw=False):
             raise ValueError('Container and 1 GiB diagnostic reserve do not fit the target partition')
         if link_raw:
             print(f'Verifying linked raw container - {size / 2**30:.2f} GiB', flush=True)
-            digest = hashlib.file_digest(handle, 'sha256').hexdigest()
+            digest = hash_image(handle, size, f'Verifying {raw.name}')
         else:
             digest = export(handle, raw, size)
         if digest != manifest['sha256']:

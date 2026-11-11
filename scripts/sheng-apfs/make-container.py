@@ -3,7 +3,6 @@
 
 import argparse
 import fcntl
-import hashlib
 import json
 import os
 import plistlib
@@ -14,7 +13,7 @@ import time
 from contextlib import contextmanager
 from pathlib import Path
 
-from image import CHUNK, geometry
+from image import geometry, hash_image
 
 
 def run(*args):
@@ -191,12 +190,10 @@ def checked_container(disk):
 
 
 def image_hash(disk):
-    print(f'Hashing {disk.name} - {disk.stat().st_size / 2**30:.2f} GiB', flush=True)
-    digest = hashlib.sha256()
+    size = disk.stat().st_size
+    print(f'Hashing {disk.name} - {size / 2**30:.2f} GiB', flush=True)
     with disk.open('rb') as handle:
-        for data in iter(lambda: handle.read(CHUNK), b''):
-            digest.update(data)
-    return digest.hexdigest()
+        return hash_image(handle, size, f'Hashing {disk.name}')
 
 
 def verify_xart(baseline, directory):

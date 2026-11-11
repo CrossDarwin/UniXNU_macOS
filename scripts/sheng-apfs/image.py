@@ -20,6 +20,25 @@ def geometry(handle):
     return block * count, str(uuid.UUID(bytes=header[72:88])).upper()
 
 
+def hash_image(handle, size, label):
+    digest = hashlib.sha256()
+    read = 0
+    next_update = time.monotonic() + 10
+    while read < size:
+        data = handle.read(min(CHUNK, size - read))
+        if not data:
+            raise ValueError('Unexpected end of the APFS container')
+        digest.update(data)
+        read += len(data)
+        now = time.monotonic()
+        if now >= next_update:
+            print(f'{label} - {read / size:.1%} - {read}/{size} bytes', flush=True)
+            next_update = now + 10
+    if handle.read(1):
+        raise ValueError('APFS image grew while hashing')
+    return digest.hexdigest()
+
+
 def export(handle, destination, size):
     print(f'Exporting {destination.name} - {size / 2**30:.2f} GiB', flush=True)
     digest = hashlib.sha256()
