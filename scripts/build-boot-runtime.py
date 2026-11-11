@@ -396,6 +396,20 @@ def main():
             script('addon-add-dir.py', addon, candidate, 'Library/User Template/Non_localized', template)
             addon = out / 'template-addon.bin'
             candidate.replace(addon)
+        if request.get('desktop_diagnostics'):
+            if request.get('target') != 'macos27' or addon is None:
+                raise SystemExit('Desktop diagnostics require a macOS GPU addon')
+            diagnostics = work / 'desktop-diagnostics'
+            bins, jobs = diagnostics / 'bin', diagnostics / 'jobs'
+            bins.mkdir(parents=True)
+            jobs.mkdir()
+            package = Path(request['device']) / 'package'
+            shutil.copyfile(package / 'DesktopDiagnostics.sh', bins / 'DesktopDiagnostics.sh')
+            shutil.copyfile(package / 'desktop-diagnostics.plist', jobs / 'org.unixnu.desktop-diagnostics.plist')
+            candidate = work / 'desktop-addon.bin'
+            script('addon-add-dir.py', addon, candidate, 'bin', bins, 'Library/LaunchDaemons', jobs)
+            addon = out / 'desktop-addon.bin'
+            candidate.replace(addon)
         test_scripts = os.environ.get('UNIXNU_MACOS_TEST')
         if request.get('target') == 'macos27' and addon is not None and test_scripts:
             # Unattended testing only (never set for a release): UNIXNU_MACOS_TEST names a directory with daemon.sh (run as root at
