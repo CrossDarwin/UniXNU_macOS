@@ -12,6 +12,9 @@ ARM device-tree platform expert. Publishes CPU nubs and every `arm-io` child fro
 
 Generic driver. Requires `/cpus`, `/arm-io`, `/defaults`, `/options` and the NVRAM proxy.
 
+Restart and power-off use PSCI. Set `/psci/method` to `smc` or `hvc` for the
+firmware conduit. Sleep and resume need separate CPU and peripheral support.
+
 ## Build
 
 The selected kernel recipe builds `build/armdt-platform/libArmDTPlatform.a` through `component:ArmDTPlatform`. Enable its personality and supply the required ADT nodes before checking provider publication.

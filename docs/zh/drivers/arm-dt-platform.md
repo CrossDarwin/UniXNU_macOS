@@ -12,6 +12,9 @@ ARM 设备树平台专家。从 ADT 发布 CPU nub 和每个 `arm-io` 子节点�
 
 通用驱动。需要 `/cpus`、`/arm-io`、`/defaults`、`/options` 和 NVRAM proxy。
 
+重启和关机使用 PSCI。按固件通道将 `/psci/method` 设为 `smc` 或 `hvc`。
+睡眠和唤醒需要另行接入 CPU 与外设恢复。
+
 ## 构建
 
 选定内核配方通过 `component:ArmDTPlatform` 构建 `build/armdt-platform/libArmDTPlatform.a`。启用其 personality 并提供必需 ADT 节点，再检查 provider 发布。
