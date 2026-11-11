@@ -11,6 +11,7 @@ import re
 import shutil
 import subprocess
 import sys
+import tempfile
 import time
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from debug_screen import ScreenWire, ScreenStore, ScreenViewer, ScreenControl
@@ -225,8 +226,8 @@ def matching_ports(ports, vid=None, pid=None, serial_number=None):
 class Capture:
     def __init__(self, root):
         root.mkdir(parents=True, exist_ok=True)
-        self.root = root / datetime.now().strftime('%Y%m%d-%H%M%S-%f')
-        self.root.mkdir()
+        stamp = datetime.now().strftime('%Y%m%d-%H%M%S-%f')
+        self.root = Path(tempfile.mkdtemp(prefix=f'{stamp}-', dir=root))
         self.part = 0
         self.stream = (self.root / 'device-000.log').open('xb')
         self.decoder = codecs.getincrementaldecoder('utf-8')('replace')

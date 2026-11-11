@@ -87,13 +87,15 @@ class Screen(unittest.TestCase):
         self.assertEqual(wire.feed(packet(pixels, size=2))[1], [])
         self.assertEqual(wire.feed(stop_packet() + b'pong\n'), (b'pong\n', []))
         self.assertIsNone(wire.frame)
-        with tempfile.TemporaryDirectory() as directory:
+        with tempfile.TemporaryDirectory() as directory, patch.object(terminal, 'datetime') as clock:
+            clock.now.return_value.strftime.return_value = '20261111-112020-944122'
             capture = terminal.Capture(Path(directory))
             capture.feed(packet(pixels)[:46])
             self.assertEqual(capture.screen_store.info['frames'], 0)
             capture.close()
             other = terminal.Capture(Path(directory))
             try:
+                self.assertNotEqual(other.root, capture.root)
                 self.assertEqual(other.feed(b'reconnected\n'), 'reconnected\n')
                 self.assertEqual(other.screen_store.info['frames'], 0)
             finally:
