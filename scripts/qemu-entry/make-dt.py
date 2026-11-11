@@ -36,6 +36,7 @@ parser.add_argument('--crypto-hash-method', choices=['sha2-384', 'sha1'], help='
 parser.add_argument('--osenvironment', choices=['ramdisk','recoveryos','main'], help='Explicit /chosen/osenvironment fixture; the kernel publishes it as hw.osenvironment')
 parser.add_argument('--amfi-platform-only', action='store_true', help='Require platform code in the offline AMFI policy fixture')
 parser.add_argument('--trust-cache', action='store_true', help='Provide a zeroed owned TrustCache sidecar binding')
+parser.add_argument('--root-policies', action='store_true', help='Provide a RootPolicies binding for the signed kernel.macho.vroot sidecar')
 parser.add_argument('--virtio-mmio-fdt', type=Path, help='Describe actual VirtIO resource windows from a QEMU-generated FDT')
 parser.add_argument('--root-match-volume-uuid', type=uuid.UUID, help='Match an actual IOMedia UUID through the source root-matching mechanism')
 args = parser.parse_args()
@@ -88,6 +89,8 @@ if args.virtio_mmio_fdt:
         virtio_nodes.append(node('virtio-mmio-' + str(index), [('compatible', b'virtio,mmio\0'),
             ('reg', struct.pack('<QQ', address - 0x08000000, size)), ('dma-coherent', b'')]))
 cpu = node('cpu0', [('state', b'running\0'), ('reg', struct.pack('<I', 0)),
+                    *([('cluster-type', struct.pack('<I', ord('P'))),
+                       ('cluster-id', struct.pack('<I', 0))] if args.armvirt else []),
                     *([('device_type', b'cpu\0'), ('compatible', b'arm,cortex-a710\0' if args.qemu_accel == 'tcg' else b'arm,armv8\0')] if args.armvirt else []),
                     ('timebase-frequency', struct.pack('<I', timebase)),
                     *([('clock-frequency', struct.pack('<I', 1000000000))] if args.qemu_accel == 'tcg' else [])])
@@ -95,6 +98,7 @@ tree = node('device-tree', [('model', b'qemu-entry-fixture\0'),
                           *([('#address-cells', struct.pack('<I', 2)), ('#size-cells', struct.pack('<I', 2))] if virtio_nodes else []),
                           *([('compatible', args.platform_compatible.encode() + b'\0')] if args.armvirt else [])], [
     node('chosen', [('random-seed', os.urandom(256)),
+                    ('kernel-ctrr-to-be-enabled', struct.pack('<I', 0)),
                     # This fixture's writable Data lives only in the owned
                     # RAMDisk. Publish its actual nonpersistent lifetime via
                     # XNU's standard hw.ephemeral_storage device-tree input.
@@ -109,9 +113,12 @@ tree = node('device-tree', [('model', b'qemu-entry-fixture\0'),
                     *([('amfi-only-platform-code', struct.pack('<I', 1))] if args.amfi_platform_only else []),
                     *(empty_nvram_proxy() if args.nvram_proxy else [])], [node('memory-map',
                     [*([('RAMDisk', bytes(16))] if args.ramdisk or args.data_ramdisk else []),
-                     *([('TrustCache', bytes(16))] if args.trust_cache else [])]),
+                     *([('TrustCache', bytes(16))] if args.trust_cache else []),
+                     *([('RootPolicies', bytes(16))] if args.root_policies else [])]),
                      *([node('manifest-properties')] if args.armvirt else [])]),
     node('cpus', children=[cpu, *[node('cpu%d' % index, [('state', b'waiting\0'), ('reg', struct.pack('<I', index)),
+                    *([('cluster-type', struct.pack('<I', ord('P'))),
+                       ('cluster-id', struct.pack('<I', 0))] if args.armvirt else []),
                     ('device_type', b'cpu\0'), ('compatible', b'arm,cortex-a710\0' if args.qemu_accel == 'tcg' else b'arm,armv8\0'),
                     ('timebase-frequency', struct.pack('<I', timebase))]) for index in range(1, args.smp)]]),
     *([node('psci', [('compatible', b'arm,psci-1.0\0'), ('method', b'hvc\0')])] if args.smp > 1 else []), node('defaults',

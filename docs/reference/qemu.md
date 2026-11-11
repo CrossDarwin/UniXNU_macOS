@@ -97,13 +97,16 @@ python3 scripts/qemu-entry/make-dt.py \
 | `--owned-memory-size` | Contiguous DarwinBoot window |
 | `--data-ramdisk` | Scratch Data placeholder |
 | `--trust-cache` | Trust cache placeholder |
+| `--root-policies` | Signed `kernel.macho.vroot` sidecar binding |
 | `--nvram-proxy` | Volatile CHRP NVRAM proxy |
 | `--root-match-volume-uuid` | Root volume match |
 | `--osenvironment` | `main`, `recoveryos` or `ramdisk` |
 | `--qemu-vmm-present` | Report the VMM in `/defaults` |
 | `--crypto-hash-method` | Image4 hash method |
 
-The generator describes QEMU and uses QEMU values only.
+The generator describes QEMU and uses QEMU values only. With `--armvirt`,
+all virtual CPUs belong to one P cluster, including when AMP scheduling is enabled.
+Also pass `smp=1` in the XNU entry's boot arguments to start secondary CPUs.
 
 ## HVF
 

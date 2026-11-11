@@ -97,13 +97,15 @@ python3 scripts/qemu-entry/make-dt.py \
 | `--owned-memory-size` | DarwinBoot 连续窗口 |
 | `--data-ramdisk` | scratch Data 占位符 |
 | `--trust-cache` | trust cache 占位符 |
+| `--root-policies` | 已签名的 `kernel.macho.vroot` sidecar 绑定 |
 | `--nvram-proxy` | 易失 CHRP NVRAM proxy |
 | `--root-match-volume-uuid` | 根卷匹配 |
 | `--osenvironment` | `main`、`recoveryos` 或 `ramdisk` |
 | `--qemu-vmm-present` | 在 `/defaults` 中报告 VMM |
 | `--crypto-hash-method` | Image4 哈希方法 |
 
-生成器描述 QEMU，只使用 QEMU 数值。
+生成器描述 QEMU，只使用 QEMU 数值。启用 `--armvirt` 时，所有虚拟 CPU 属于同一个 P 簇，供启用 AMP 调度的内核初始化。
+验证多核时，还需在 XNU 启动参数中加入 `smp=1`。
 
 ## HVF
 
