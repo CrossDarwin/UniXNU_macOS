@@ -32,6 +32,7 @@ parser.add_argument('--kernel', type=Path, help='Kernel whose SHA-256 identifies
 block_group = parser.add_mutually_exclusive_group()
 block_group.add_argument('--virtio-block-image', type=Path, help='Attach an existing sector-aligned raw file as a strictly read-only modern MMIO disk')
 block_group.add_argument('--virtio-udif-image', type=Path, help='Read an already attached read-only UDIF image through its verified host virtual media')
+parser.add_argument('--virtio-overlay', type=Path, help='Existing writable qcow2 overlay over --virtio-block-image; the raw backing remains read-only')
 parser.add_argument('--virtio-extra-block-image', type=Path, help='Second existing raw file, strictly read-only, for offline two-volume component tests')
 parser.add_argument('--missing-virtio-device', action='store_true', help='Refusal control: leave described MMIO windows empty while retaining the read-only input identity')
 parser.add_argument('--capture-screen',action='store_true',help='Read the actual stopped QEMU console through QMP screendump into a PNG; no guest execution or drawing')
@@ -162,8 +163,8 @@ if args.read_followed_checkpoint_arg and not args.finish_followed_checkpoint:
     parser.error('--read-followed-checkpoint-arg requires --finish-followed-checkpoint')
 if args.read_followed_relative and args.follow_entrypoint_arg is None:
     parser.error('--read-followed-relative requires an actual followed entry')
-if (args.read_entry_indirect or args.read_entry_user_indirect) and not args.finish_function:
-    parser.error('--read-entry-indirect requires --finish-function')
+if (args.read_entry_indirect or args.read_entry_user_indirect) and not args.esp:
+    parser.error('--read-entry-indirect requires an observed ESP function entry')
 if args.read_entry_user_vector and not args.finish_function:
     parser.error('User argv observation requires a real finished function call')
 if args.read_entry_user_indirect and args.inspect_entry_translations:
@@ -279,6 +280,17 @@ if args.virtio_block_image:
                        device_attached=not args.missing_virtio_device,
                        first_sector_sha256=hashlib.sha256(first_sector).hexdigest())
     block_file_driver = 'file'
+if args.virtio_overlay:
+    if not args.virtio_block_image or args.missing_virtio_device:
+        parser.error('A writable overlay requires an attached raw block image')
+    overlay = args.virtio_overlay.resolve()
+    info = json.loads(subprocess.check_output(['qemu-img', 'info', '--output=json', str(overlay)], text=True))
+    if (info.get('format') != 'qcow2' or info.get('virtual-size') != disk.stat().st_size or
+            Path(info.get('full-backing-filename', '')).resolve() != disk or
+            info.get('backing-filename-format') != 'raw'):
+        parser.error('Overlay geometry or raw backing file differs from the selected image')
+    block_input.update(read_only=False, overlay=str(overlay), backing_read_only=True)
+
 if args.virtio_udif_image:
     import plistlib
     source = args.virtio_udif_image.resolve()
@@ -356,8 +368,10 @@ if args.qemu_ramfb:
     command += ['-device', 'ramfb']
 if block_input:
     command += ['-global', 'virtio-mmio.force-legacy=false', '-blockdev', json.dumps({
-        'driver': 'raw', 'node-name': 'offline-block', 'read-only': True,
-        'file': {'driver': block_file_driver, 'filename': str(disk), 'read-only': True, 'locking': 'off'}})]
+        'driver': 'qcow2' if args.virtio_overlay else 'raw', 'node-name': 'offline-block',
+        'read-only': not bool(args.virtio_overlay),
+        'file': {'driver': block_file_driver, 'filename': str(overlay if args.virtio_overlay else disk),
+                 'read-only': not bool(args.virtio_overlay), 'locking': 'off'}})]
     if not args.missing_virtio_device:
         command += ['-device', 'virtio-blk-device,drive=offline-block']
 if extra_block_input:
@@ -1301,16 +1315,19 @@ with (fixture / 'gdb-stderr.log').open('w') as errors:
                         raise RuntimeError('Cannot read actual entry argument region')
                     report['entry_regions'][request] = dict(address=hex(pointer), bytes=raw)
             report['entry_indirect_memory'] = {}
-            if entry_arguments is not None:
+            if region_arguments is not None:
                 for request in args.read_entry_indirect + args.read_entry_user_indirect:
                     index, offset, length = (int(part, 16) for part in request.split(':'))
                     if not 0 <= index < 4 or not 0 <= offset <= 4096 or not 0 < length <= 4096:
                         raise ValueError('Read bounded pointer fields from entry arguments x0-x3')
-                    raw = packet(f'm{entry_arguments[index] + offset:x},8')
+                    raw = packet(f'm{region_arguments[index] + offset:x},8')
                     if len(raw) != 16 or raw.startswith('E'):
                         raise RuntimeError('Cannot read original function argument pointer')
                     pointer = int.from_bytes(bytes.fromhex(raw), 'little')
                     user_pointer = request in args.read_entry_user_indirect
+                    if not pointer:
+                        report['entry_indirect_memory'][request] = {'pointer': '0x0', 'unavailable': 'null pointer'}
+                        continue
                     if user_pointer and not 0 < pointer < 0xfffffff000000000 - length:
                         raise RuntimeError('Expected a non-null bounded user virtual pointer')
                     if not user_pointer and pointer < 0xfffffff000000000:
