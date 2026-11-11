@@ -1,6 +1,6 @@
 --- a/bsd/kern/kern_exec.c
 +++ b/bsd/kern/kern_exec.c
-@@ -8173,8 +8173,91 @@
+@@ -8173,8 +8173,94 @@
  }
  
  static int
@@ -26,6 +26,8 @@
 +	memcpy(uuid, value, size);
 +	return 1;
 +}
++
++int (*native_apfs_auxiliary_store_hook)(dev_t) = NULL;
 +
 +/* Copies made on a SIP-enabled host cannot retain SF_RESTRICTED. The
 + * development exception is confined to cache files on the bound read-only
@@ -70,6 +72,7 @@
 +	    strcmp(vfs_statfs(root_mount)->f_fstypename, "apfs") ||
 +	    !native_verified_block_root_authorized(actual)) return EAUTH;
 +	if (!native_owner_publish_boot_manifest(actual, system_uuid, actual, system_uuid)) return EAUTH;
++	if (!native_apfs_auxiliary_store_hook || !native_apfs_auxiliary_store_hook(actual)) return EAUTH;
 +	*envp = USER_ADDR_NULL;
 +	native_owner_cache_stage = 6;
 +	native_owner_cache_status = 0;

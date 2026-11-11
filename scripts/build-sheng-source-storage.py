@@ -204,10 +204,25 @@ OSDefineOperatorMethods(IOBlockStorageDevice)
         adapter = helper('native_apfs_stage', ROOT / 'scripts/sheng-apfs/stage-driver.py')
         ufs_source = adapter.stage(ufs_source.parent.resolve(),
                                    out / ('apfs-' + str(os.getpid())), Path(apfs_receipt).resolve())
+    root_binding = device_source('SourceRootBinding.cpp')
+    storage_source = device_source('SourceStorage.cpp')
+    if apfs_receipt:
+        binding = root_binding.read_text()
+        binding += (ROOT / 'scripts/sheng-apfs/auxiliary-store.inc').read_text()
+        root_binding = out / 'NativeApfsRootBinding.cpp'
+        root_binding.write_text(binding)
+        storage = storage_source.read_text()
+        storage = 'extern "C" void native_apfs_auxiliary_store_init(void);\n' + storage
+        registration = '    source_storage_ram_init();'
+        if storage.count(registration) != 1:
+            parser.error('The source storage registration changed')
+        storage = storage.replace(registration, registration + '\n    native_apfs_auxiliary_store_init();')
+        storage_source = out / 'SourceStorage.cpp'
+        storage_source.write_text(storage)
     # The RAM disk carries the Data seed in the legacy layout.
     sources = [base, ufs_source, ROOT / 'drivers/RamBlock/NativeRamBlock.cpp',
-               device_source('SourceStorage.cpp'), device_source('SourceRootPolicies.cpp'),
-               device_source('SourceRootBinding.cpp'), device_source('BootLog.c'), boot_log_defaults, device_source('BootReset.c'),
+               storage_source, device_source('SourceRootPolicies.cpp'),
+               root_binding, device_source('BootLog.c'), boot_log_defaults, device_source('BootReset.c'),
                ROOT / 'kits/VerifiedRoot/src/verified_root.c',
                ROOT / 'kits/VerifiedRoot/adapters/xnu_crypto.c', anchor]
     if int(os.environ['UNIXNU_IOS_VERSION'].split('.')[0]) >= 27:

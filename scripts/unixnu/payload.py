@@ -129,7 +129,8 @@ def build(ctx, kernel=None):
                 'adt': {**spec.get('adt', {}), 'root_match_volume_uuid': receipt['system_uuid']}}
         platform = ctx.board.get('adt', {})
         chosen = platform.get('chosen', {})
-        identities = {'apfs-system': receipt['system_uuid'], 'apfs-data': receipt['volumes']['Data']['uuid']}
+        identities = {'apfs-system': receipt['system_uuid'], 'apfs-data': receipt['volumes']['Data']['uuid'],
+                      'boot-uuid': receipt['system_uuid'], 'apfs-preboot-uuid': receipt['system_uuid']}
         board = {**ctx.board, 'payload': spec, 'adt': {**platform, 'chosen': {
             **chosen, 'string': {**chosen.get('string', {}), **identities}}}}
     line = check_args(arguments)
