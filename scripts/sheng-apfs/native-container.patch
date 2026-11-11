@@ -43,15 +43,16 @@
    IOReturn doSynchronize (UInt64, UInt64, IOOptionBits) override { return doSynchronizeCache (); }
    IOReturn getWriteCacheState (bool *value) override { *value = false; return kIOReturnSuccess; }
    IOReturn setWriteCacheState (bool) override { return kIOReturnUnsupported; }
-@@ -2015,6 +2024,7 @@
+@@ -2015,6 +2024,8 @@
    strlcpy (label, name, sizeof (label));
    absolute = absoluteOffset;
    bytes = size;
 +  nativeContainer = !strcmp(name, "APFS") && nativeApfsRequested();
++  if (nativeContainer && !hostStoreOpen(absolute / 4096, bytes / 4096)) return false;
    windowLock = IOLockAlloc ();
    if (!windowLock) return false;
    for (unsigned k = 0; k < kBounces; ++k) {
-@@ -2028,6 +2038,10 @@
+@@ -2028,6 +2039,10 @@
  #if defined(NATIVE_VERIFIED_BLOCK) && NATIVE_VERIFIED_BLOCK
    // Reads are served only after each 4096-byte integrity block verifies against the owner-signed
    // policy; without a matching policy the device is never published.
@@ -62,7 +63,7 @@
    return configureVerification ();
  #else
    return true;
-@@ -2341,6 +2355,11 @@
+@@ -2341,6 +2356,11 @@
  
  bool NativeUfsBlock::authenticatesVolume (const char *uuid, uint8_t *manifestDigest)
  {
@@ -74,7 +75,7 @@
    if (!uuid || !online || !verifiedReady) {
      return false;
    }
-@@ -2373,6 +2392,7 @@
+@@ -2373,6 +2393,7 @@
  
  bool NativeUfsBlock::signedVolumeUuid (char out[37]) const
  {
@@ -82,7 +83,7 @@
    if (!verifiedReady) {
      return false;
    }
-@@ -2423,6 +2443,32 @@
+@@ -2423,6 +2444,32 @@
  IOReturn NativeUfsBlock::doAsyncReadWrite (IOMemoryDescriptor *buffer, UInt64 block, UInt64 count,
                                             IOStorageAttributes *, IOStorageCompletion *completion)
  {
