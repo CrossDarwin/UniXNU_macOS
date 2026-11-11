@@ -1,6 +1,6 @@
 --- a/bsd/kern/kern_exec.c
 +++ b/bsd/kern/kern_exec.c
-@@ -8173,8 +8173,63 @@
+@@ -8173,8 +8173,91 @@
  }
  
  static int
@@ -25,6 +25,34 @@
 +	    !value || size != 37 || ((const char *)value)[36]) return 0;
 +	memcpy(uuid, value, size);
 +	return 1;
++}
++
++/* Copies made on a SIP-enabled host cannot retain SF_RESTRICTED. The
++ * development exception is confined to cache files on the bound read-only
++ * System volume; code-signature and mapping checks still follow. */
++int
++native_apfs_shared_cache_allowed(vnode_t file)
++{
++	if (!native_apfs_root_enabled() || !file || vnode_vtype(file) != VREG ||
++	    !native_owner_cache_authorized || !native_owner_cache_readonly) return 0;
++	mount_t mount = vnode_mount(file);
++	if (mount != vnode_mount(rootvnode) || !(vfs_flags(mount) & MNT_RDONLY) ||
++	    strcmp(vfs_statfs(mount)->f_fstypename, "apfs")) return 0;
++	vnode_t device = vfs_devvp(mount);
++	dev_t actual = device ? vnode_specrdev(device) : NODEV;
++	if (device) vnode_put(device);
++	if (actual != native_owner_cache_selected_device ||
++	    !native_verified_block_root_authorized(actual)) return 0;
++	vnode_t parent = NULLVP;
++	if (vnode_lookup("/System/Library/dyld", 0, &parent, vfs_context_current())) return 0;
++	const char *name = vnode_getname(file);
++	int allowed = vnode_mount(parent) == mount && vnode_parent(file) == parent &&
++	    name && !strncmp(name, "dyld_shared_cache_arm64e", sizeof("dyld_shared_cache_arm64e") - 1) &&
++	    (name[sizeof("dyld_shared_cache_arm64e") - 1] == 0 ||
++	     name[sizeof("dyld_shared_cache_arm64e") - 1] == '.');
++	if (name) vnode_putname(name);
++	vnode_put(parent);
++	return allowed;
 +}
 +
 +static int
@@ -156,3 +184,19 @@
  	bool tagged = tag && chosen->setProperty("owner-boot-manifest-domain", tag);
  	bool published = tagged && value && chosen->setProperty("boot-manifest-hash", value);
  	uint8_t actual[48];
+--- a/bsd/vm/vm_unix.c
++++ b/bsd/vm/vm_unix.c
+@@ -1757,7 +1757,12 @@
+ 				goto done;
+ 			}
+ 
+-			if (!(va.va_flags & SF_RESTRICTED)) {
++			int native_apfs_cache = 0;
++#if (DEVELOPMENT || DEBUG) && XNU_TARGET_OS_OSX
++			extern int native_apfs_shared_cache_allowed(vnode_t);
++			native_apfs_cache = native_apfs_shared_cache_allowed(srfmp->vp);
++#endif
++			if (!(va.va_flags & SF_RESTRICTED) && !native_apfs_cache) {
+ 				/*
+ 				 * CSR is not configured in CSR_ALLOW_UNRESTRICTED_FS mode, and
+ 				 * the shared cache file is NOT SIP-protected, so reject the

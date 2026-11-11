@@ -87,4 +87,7 @@ The kernel binds the container size and UUID. The payload binds the System and
 Data volume UUIDs. System mounts read-only, with the dyld cache in that volume.
 The APFS backend provides writable Data and reserves the end of `userdata`
 for diagnostics. This development image has no System volume seal or per-block
-signature verification. Installing it replaces the existing `userdata` layout.
+signature verification. Copies made on a SIP-enabled build host lose restricted
+file flags. This profile permits dyld cache mapping only from the bound read-only
+System volume at `/System/Library/dyld`; signature validation remains enabled.
+Installing it replaces the existing `userdata` layout.
