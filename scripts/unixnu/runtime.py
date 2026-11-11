@@ -32,6 +32,17 @@ def seed_uuid(tree, path):
 
 
 def prepare(ctx, kernel_build=False):
+    from . import apfs_root
+    if apfs_root.selected(ctx):
+        args = ctx.args
+        if getattr(args, 'data_ramdisk', None) or getattr(args, 'init_data', False) or getattr(args, 'skip_setup', False):
+            raise Error('Native APFS Data is prepared by make-container.py')
+        for name, filename in (('owner_trust_cache', 'owner-trust.bundle'), ('gpu_addon', 'gpuaddon.bin')):
+            path = Path(getattr(args, name, None) or ctx.work / 'runtime' / filename).expanduser().resolve()
+            if not path.is_file():
+                raise Error(f'Native APFS boot requires the prepared runtime input {path}')
+            setattr(args, name, str(path))
+        return
     spec = ctx.board.get('payload', {}).get('runtime')
     if not spec or not spec.get('enabled', True):
         from .payload import check_data_input

@@ -16,7 +16,7 @@ import shutil
 import tempfile
 from pathlib import Path
 
-from . import kernel as kernel_step
+from . import apfs_root, kernel as kernel_step
 from .util import Error, expand, log, run, sha256_file, tool
 
 EPOCH = 315532800   # 1980-01-01, the first FAT timestamp; keeps the volume reproducible
@@ -111,11 +111,27 @@ def build(ctx, kernel=None):
     kernel = expand(kernel or getattr(args, 'kernel', None) or ctx.work / 'kernel/kernel.macho')
     if not kernel.is_file():
         raise Error(f'kernel not found: {kernel}; run "unixnu build kernel" or pass --kernel FILE')
+    board = ctx.board
     extra = list(getattr(args, 'kernel_arg', None) or [])
     # An extra NAME=VALUE replaces the board's argument of the same name. The extra arguments come first: a run's own switches
     # (autoreset above all, which brings an unattended run back to fastboot) are the last to go if the line is ever cut short.
     names = {item.split('=', 1)[0] for item in extra}
     arguments = extra + [item for item in spec.get('kernel_args', []) if item.split('=', 1)[0] not in names]
+    native = apfs_root.selected(ctx)
+    if native:
+        receipt, fingerprint = native
+        if (apfs_root.marker(fingerprint).encode() + b'\0') not in kernel.read_bytes():
+            raise Error('Kernel was built for a different native APFS receipt')
+        legacy = {'data-persist', 'apfs-boot-shim', 'native-apfs-root'}
+        arguments = ['native-apfs-root=1'] + [
+            item for item in arguments if item.split('=', 1)[0] not in legacy]
+        spec = {**spec, 'title': 'SHENG - Native APFS', 'timeout': -1,
+                'adt': {**spec.get('adt', {}), 'root_match_volume_uuid': receipt['system_uuid']}}
+        platform = ctx.board.get('adt', {})
+        chosen = platform.get('chosen', {})
+        identities = {'apfs-system': receipt['system_uuid'], 'apfs-data': receipt['volumes']['Data']['uuid']}
+        board = {**ctx.board, 'payload': spec, 'adt': {**platform, 'chosen': {
+            **chosen, 'string': {**chosen.get('string', {}), **identities}}}}
     line = check_args(arguments)
     log(f'kernel args: {line}')
     check_native_root(kernel, arguments, bool(ctx.board.get('adt', {}).get('defaults', {}).get('u32', {}).get('vmm-present')))
@@ -128,7 +144,11 @@ def build(ctx, kernel=None):
         if allowed and not owner_trust and sha256_file(trust) not in allowed:
             raise Error(f'{trust} is not one of the trust caches this board accepts (board.toml [payload] trust_cache_sha256)')
     data = expand(args.data_ramdisk) if getattr(args, 'data_ramdisk', None) else None
-    check_data_input(ctx, data)
+    if native:
+        if data or spec.get('install'):
+            raise Error('Native APFS boot cannot carry a legacy Data seed or install entry')
+    else:
+        check_data_input(ctx, data)
     if data and not data.is_file():
         raise Error(f'Data ramdisk not found: {data}')
     if getattr(args, 'skip_setup', False):
@@ -194,7 +214,7 @@ def build(ctx, kernel=None):
         from .devicetree import compile_hardware, generate
         dtb = compile_hardware(ctx)
         (payloads / 'kernel.macho.adt').write_bytes(generate(
-            dtb, ctx.board, unique_chip_id=seed, data=bool(data), trust=bool(trust), addon=bool(addon),
+            dtb, board, unique_chip_id=seed, data=bool(data), trust=bool(trust), addon=bool(addon),
             root_policies=bool(policies)))
     else:
         command = ['python3', ctx.tree / adt['tool'], '--output', payloads / 'kernel.macho.adt', '--dram-size', str(spec['dram_size'])]
@@ -247,6 +267,10 @@ def build(ctx, kernel=None):
         os.utime(path, (EPOCH, EPOCH))
     size = int(spec.get('size_mib', 192))
     content = sum(p.stat().st_size for p in stage.rglob('*') if p.is_file())
+    if native:
+        # Round up to 4 MiB with room for FAT metadata and the largest file.
+        unit = 4 * 1024 * 1024
+        size = max(64, 4 * ((content * 100 + unit * 95 - 1) // (unit * 95)))
     if content > size * 1024 * 1024 * 0.95:
         raise Error(f'the payload files take {content >> 20} MiB; raise size_mib (now {size}) in board.toml [payload]')
     write_volume(stage, image, spec.get('volume', 'UNIXNU')[:11], size)
@@ -255,6 +279,9 @@ def build(ctx, kernel=None):
                    'trust_cache_sha256': sha256_file(trust) if trust else None, 'gpu_addon_sha256': sha256_file(addon) if addon else None,
                    'data_ramdisk_sha256': sha256_file(data) if data else None, 'skip_setup': bool(getattr(args, 'skip_setup', False)), 'panic_screen': bool(spec.get('panic_screen')),
                    'payload_sha256': sha256_file(image), 'payload_bytes': image.stat().st_size, 'hardware_tested': False}
+    if native:
+        data_report['apfs_container_receipt_sha256'] = fingerprint
+        data_report['apfs_container_uuid'] = receipt['container_uuid']
     report.write_text(json.dumps(data_report, indent=2) + '\n')
     shutil.rmtree(stage)
     log(f'payload: {image} ({image.stat().st_size >> 20} MiB)')

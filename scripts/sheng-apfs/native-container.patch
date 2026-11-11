@@ -1,0 +1,158 @@
+--- a/NativeUfs.cpp
++++ b/NativeUfs.cpp
+@@ -45,6 +45,14 @@
+ #include "TransferPoll.h"
+ #include "CompletionWait.h"
+ #include "SmmuTakeover.h"
++#include "NativeApfsConfig.h"
++#include "ContainerLayout.h"
++
++static bool nativeApfsRequested()
++{
++  int enabled = 0;
++  return PE_parse_boot_argn("native-apfs-root", &enabled, sizeof(enabled)) && enabled == 1;
++}
+ 
+ static UfsRootDiagnostics gRootDiagnostic;
+ static bool gRootDiagnosticEnabled;
+@@ -1894,6 +1902,7 @@
+   uint32_t bounceFree = 0;
+   IOLock *windowLock = nullptr;   // guards bounceFree
+   bool online = false;
++  bool nativeContainer = false;
+   uint8_t *takeBounce ()
+   {
+     IOLockLock (windowLock);
+@@ -1948,15 +1957,15 @@
+   char *getProductString () override { return label; }
+   char *getRevisionString () override { return const_cast<char *> ("1.0"); }
+   char *getAdditionalDeviceInfoString () override { return const_cast<char *> ("UFS LUN 0 userdata window, read-only"); }
+-  IOReturn reportBlockSize (UInt64 *value) override { *value = 512; return kIOReturnSuccess; }
++  IOReturn reportBlockSize (UInt64 *value) override { *value = nativeContainer ? 4096 : 512; return kIOReturnSuccess; }
+   IOReturn reportEjectability (bool *value) override { *value = false; return kIOReturnSuccess; }
+-  IOReturn reportMaxValidBlock (UInt64 *value) override { *value = bytes / 512 - 1; return kIOReturnSuccess; }
++  IOReturn reportMaxValidBlock (UInt64 *value) override { *value = bytes / (nativeContainer ? 4096 : 512) - 1; return kIOReturnSuccess; }
+   IOReturn reportMediaState (bool *present, bool *changed) override {
+     *present = online; if (changed) *changed = false; return kIOReturnSuccess;
+   }
+   IOReturn reportRemovability (bool *value) override { *value = false; return kIOReturnSuccess; }
+-  IOReturn reportWriteProtection (bool *value) override { *value = true; return kIOReturnSuccess; }
+-  IOReturn doSynchronizeCache () override { return online ? kIOReturnSuccess : kIOReturnNotReady; }
++  IOReturn reportWriteProtection (bool *value) override { *value = !nativeContainer; return kIOReturnSuccess; }
++  IOReturn doSynchronizeCache () override { return !online ? kIOReturnNotReady : nativeContainer ? hostSyncCache() : kIOReturnSuccess; }
+   IOReturn doSynchronize (UInt64, UInt64, IOOptionBits) override { return doSynchronizeCache (); }
+   IOReturn getWriteCacheState (bool *value) override { *value = false; return kIOReturnSuccess; }
+   IOReturn setWriteCacheState (bool) override { return kIOReturnUnsupported; }
+@@ -2015,6 +2024,7 @@
+   strlcpy (label, name, sizeof (label));
+   absolute = absoluteOffset;
+   bytes = size;
++  nativeContainer = !strcmp(name, "APFS") && nativeApfsRequested();
+   windowLock = IOLockAlloc ();
+   if (!windowLock) return false;
+   for (unsigned k = 0; k < kBounces; ++k) {
+@@ -2028,6 +2038,10 @@
+ #if defined(NATIVE_VERIFIED_BLOCK) && NATIVE_VERIFIED_BLOCK
+   // Reads are served only after each 4096-byte integrity block verifies against the owner-signed
+   // policy; without a matching policy the device is never published.
++  if (nativeContainer) {
++    IOLog("NativeUfs: experimental unsealed APFS - writable, no block-hash verification, %s\n", UNIXNU_APFS_MARKER);
++    return true;
++  }
+   return configureVerification ();
+ #else
+   return true;
+@@ -2341,6 +2355,11 @@
+ 
+ bool NativeUfsBlock::authenticatesVolume (const char *uuid, uint8_t *manifestDigest)
+ {
++  if (nativeContainer) {
++    if (!uuid || !online || (strcmp(uuid, UNIXNU_APFS_SYSTEM_UUID) && strcmp(uuid, UNIXNU_APFS_DATA_UUID))) return false;
++    if (manifestDigest) memcpy(manifestDigest, kNativeApfsImageIdentity, 48);
++    return true;
++  }
+   if (!uuid || !online || !verifiedReady) {
+     return false;
+   }
+@@ -2373,6 +2392,7 @@
+ 
+ bool NativeUfsBlock::signedVolumeUuid (char out[37]) const
+ {
++  if (nativeContainer) { strlcpy(out, UNIXNU_APFS_SYSTEM_UUID, 37); return true; }
+   if (!verifiedReady) {
+     return false;
+   }
+@@ -2423,6 +2443,32 @@
+ IOReturn NativeUfsBlock::doAsyncReadWrite (IOMemoryDescriptor *buffer, UInt64 block, UInt64 count,
+                                            IOStorageAttributes *, IOStorageCompletion *completion)
+ {
++  if (nativeContainer) {
++    if (!buffer || !completion || !completion->action || !count || block >= bytes / 4096 ||
++        count > bytes / 4096 - block || buffer->getLength() < count * 4096) return kIOReturnBadArgument;
++    if (!online) return kIOReturnNotReady;
++    const bool writing = buffer->getDirection() == kIODirectionOut;
++    if (!writing && buffer->getDirection() != kIODirectionIn) return kIOReturnBadArgument;
++    uint8_t *bounce = takeBounce();
++    uint64_t done = 0;
++    IOReturn result = kIOReturnSuccess;
++    while (done < count * 4096) {
++      const uint32_t blocks = static_cast<uint32_t>((count * 4096 - done) / 4096 > kDataMax / 4096 ?
++                                                   kDataMax / 4096 : (count * 4096 - done) / 4096);
++      const uint64_t length = blocks * 4096ULL;
++      const uint64_t lba = absolute / 4096 + block + done / 4096;
++      if (writing && buffer->readBytes(done, bounce, length) != length) { result = kIOReturnUnderrun; break; }
++      result = writing ? hostWrite4k(0, lba, blocks, bounce, true) : hostRead4k(0, lba, blocks, bounce);
++      if (result != kIOReturnSuccess) break;
++      if (!writing && buffer->writeBytes(done, bounce, length) != length) { result = kIOReturnUnderrun; break; }
++      done += length;
++      if (!writing) __atomic_fetch_add(&native_ufs_block_reads, 1, __ATOMIC_RELAXED);
++    }
++    giveBounce(bounce);
++    if (result != kIOReturnSuccess) __atomic_fetch_add(&native_ufs_block_failures, 1, __ATOMIC_RELAXED);
++    completion->action(completion->target, completion->parameter, result, done);
++    return kIOReturnSuccess;
++  }
+   if (!buffer || !completion || !completion->action || !count || block >= bytes / 512 ||
+       count > bytes / 512 - block || buffer->getLength () < count * 512) {
+     return kIOReturnBadArgument;
+--- a/RootLayout.h
++++ b/RootLayout.h
+@@ -156,6 +156,17 @@
+   layout->ext4Magic = uint32_t (gScratch[1080]) | (uint32_t (gScratch[1081]) << 8);
+   layout->ext4Blocks = le32 (gScratch + 1028);
+   layout->manifestStatus = 1;
++  if (nativeApfsRequested()) {
++    const uint64_t capacity = (layout->userdataLast - layout->userdataFirst + 1) * 4096ULL;
++    layout->manifestStatus = 4;
++    if (!apfsContainerLayout(gScratch, capacity, UNIXNU_APFS_BYTES, kNativeApfsContainerUUID)) return true;
++    layout->manifestStatus = 0;
++    layout->imageBytes = UNIXNU_APFS_BYTES;
++    layout->windows = 1;
++    strlcpy(layout->window[0].name, "APFS", sizeof(layout->window[0].name));
++    layout->window[0].size = UNIXNU_APFS_BYTES;
++    return true;
++  }
+   if (layout->magic0 == 0x474e4853U && layout->magic1 == 0x544f4f52U) {        // "SHNGROOT"
+     uint32_t version = le32 (gScratch + 8), n = le32 (gScratch + 12);
+     uint64_t imageBytes = le64 (gScratch + 16);
+--- a/RootPublication.h
++++ b/RootPublication.h
+@@ -5,6 +5,9 @@
+ static bool ufsBuildRootPlan (const char *const *names, unsigned count, UfsRootPlan &plan)
+ {
+   plan = {};
++  if (names && count == 1 && names[0] && !strcmp(names[0], "APFS") && nativeApfsRequested()) {
++    plan.count = 1; plan.order[0] = 0; return true;
++  }
+   if (!names || count < 2 || count > 4) return false;
+   unsigned system = count, os = count;
+   for (unsigned i = 0; i < count; ++i) {
+@@ -34,7 +37,7 @@
+ template <class Ops>
+ static UfsRootPublicationResult ufsPrepareRootWindows (Ops &ops, unsigned count)
+ {
+-  if (count < 2 || count > 4) return { UfsRootPhase::Prepare, 0, 0 };
++  if (count > 4 || (count < 2 && !(count == 1 && nativeApfsRequested()))) return { UfsRootPhase::Prepare, 0, 0 };
+   for (unsigned i = 0; i < count; ++i) {
+     if (!ops.prepare (i)) {
+       // Include a partially allocated/initialized current object.

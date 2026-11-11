@@ -198,8 +198,14 @@ OSDefineOperatorMethods(IOBlockStorageDevice)
         osx.write_text('/* Generated: the macOS IOStorageFamily ABI on the iOS-triple kernel. */\n'
                        '#include <TargetConditionals.h>\n#undef TARGET_OS_OSX\n#define TARGET_OS_OSX 1\n')
         flags += ['-include', str(osx)]
-    # The RAM disk carries the Data seed; like NativeUfs its class registers with the source storage classes.
-    sources = [base, device / 'drivers/ShengUfs/NativeUfs.cpp', ROOT / 'drivers/RamBlock/NativeRamBlock.cpp',
+    ufs_source = device / 'drivers/ShengUfs/NativeUfs.cpp'
+    apfs_receipt = os.environ.get('UNIXNU_APFS_CONTAINER')
+    if apfs_receipt:
+        adapter = helper('native_apfs_stage', ROOT / 'scripts/sheng-apfs/stage-driver.py')
+        ufs_source = adapter.stage(ufs_source.parent.resolve(),
+                                   out / ('apfs-' + str(os.getpid())), Path(apfs_receipt).resolve())
+    # The RAM disk carries the Data seed in the legacy layout.
+    sources = [base, ufs_source, ROOT / 'drivers/RamBlock/NativeRamBlock.cpp',
                device_source('SourceStorage.cpp'), device_source('SourceRootPolicies.cpp'),
                device_source('SourceRootBinding.cpp'), device_source('BootLog.c'), boot_log_defaults, device_source('BootReset.c'),
                ROOT / 'kits/VerifiedRoot/src/verified_root.c',

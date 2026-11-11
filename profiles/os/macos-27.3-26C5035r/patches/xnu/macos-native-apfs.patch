@@ -1,0 +1,158 @@
+--- a/bsd/kern/kern_exec.c
++++ b/bsd/kern/kern_exec.c
+@@ -8173,8 +8173,63 @@
+ }
+ 
+ static int
++native_apfs_root_enabled(void)
++{
++#if DEVELOPMENT || DEBUG
++	int enabled = 0;
++	return PE_parse_boot_argn("native-apfs-root", &enabled, sizeof(enabled)) && enabled == 1;
++#else
++	return 0;
++#endif
++}
++
++static int
++native_apfs_volume_uuid(const char *property, char uuid[37])
++{
++	DTEntry chosen;
++	const void *value = NULL;
++	unsigned size = 0;
++	if (SecureDTLookupEntry(NULL, "/chosen", &chosen) != kSuccess ||
++	    SecureDTGetProperty(chosen, property, &value, &size) != kSuccess ||
++	    !value || size != 37 || ((const char *)value)[36]) return 0;
++	memcpy(uuid, value, size);
++	return 1;
++}
++
++static int
++native_apfs_cache_prepare(user_addr_t *envp)
++{
++	char system_uuid[37] = {0}, device_path[64] = {0};
++	dev_t selected = NODEV;
++	if (!native_apfs_volume_uuid("apfs-system", system_uuid) ||
++	    !native_verified_block_volume_device(system_uuid, &selected, device_path, sizeof(device_path))) return EAUTH;
++	mount_t root_mount = vnode_mount(rootvnode);
++	vnode_t device_node = vfs_devvp(root_mount);
++	dev_t actual = device_node ? vnode_specrdev(device_node) : NODEV;
++	if (device_node) vnode_put(device_node);
++	if (actual != selected || !(vfs_flags(root_mount) & MNT_RDONLY) ||
++	    strcmp(vfs_statfs(root_mount)->f_fstypename, "apfs") ||
++	    !native_verified_block_root_authorized(actual)) return EAUTH;
++	if (!native_owner_publish_boot_manifest(actual, system_uuid, actual, system_uuid)) return EAUTH;
++	*envp = USER_ADDR_NULL;
++	native_owner_cache_stage = 6;
++	native_owner_cache_status = 0;
++	native_owner_cache_authorized = native_owner_cache_root_recheck = native_owner_cache_readonly = 1;
++	native_owner_cache_selected_device = native_owner_cache_mounted_device = actual;
++	strlcpy(native_owner_cache_device_path, device_path, sizeof(native_owner_cache_device_path));
++#if defined(XNU_OWNER_CACHE_STARTUP) && XNU_OWNER_CACHE_STARTUP
++	dyld_flags |= UINT64_C(8);
++	commpage_update_dyld_flags(dyld_flags);
++	native_owner_cache_dyld_flags = dyld_flags;
++#endif
++	printf("Native APFS - unsealed development System root, cache in System\n");
++	return 0;
++}
++
++static int
+ native_owner_cache_prepare(proc_t p, user_addr_t scratch, user_addr_t *envp)
+ {
++	if (native_apfs_root_enabled()) return native_apfs_cache_prepare(envp);
+ #ifndef XNU_OWNER_CACHE_VOLUME_UUID
+ #define XNU_OWNER_CACHE_VOLUME_UUID "7A23BAC7-E86D-4DF4-B181-E6D80F212AE5"
+ #endif
+@@ -9481,9 +9536,10 @@
+ 		vnode_t source = NULLVP, target = NULLVP;
+ 		int result = vnode_lookup(line, VNODE_LOOKUP_NOFOLLOW, &source, ctx);
+ 		if (!result) result = vnode_lookup(target_path, VNODE_LOOKUP_NOFOLLOW, &target, ctx);
+-		if (!result && (vnode_vtype(source) != VDIR || vnode_vtype(target) != VDIR ||
++		const int already_linked = !result && source == target && vnode_vtype(source) == VDIR;
++		if (!result && !already_linked && (vnode_vtype(source) != VDIR || vnode_vtype(target) != VDIR ||
+ 		    vnode_mount(source) == vnode_mount(target))) result = ENOTDIR;
+-		if (!result) result = vnode_setasfirmlink(source, target);
++		if (!result && !already_linked) result = vnode_setasfirmlink(source, target);
+ 		if (target) vnode_put(target);
+ 		if (source) vnode_put(source);
+ 		if (result) {
+@@ -9885,6 +9941,12 @@
+ 	int error = EINVAL;
+ 	vnode_t data_root = NULLVP;
+ 	char device_path[64] = "/dev/md0";
++	int native_apfs = native_apfs_root_enabled();
++	if (native_apfs) {
++		char data_uuid[37] = {0};
++		if (!native_apfs_volume_uuid("apfs-data", data_uuid) ||
++		    !native_verified_block_volume_device(data_uuid, &device, device_path, sizeof(device_path))) { error = ENOENT; goto done; }
++	} else {
+ #if defined(XNU_NATIVE_RAM_BLOCK) && XNU_NATIVE_RAM_BLOCK
+ 	if (!native_ram_block_volume_seed(XNU_OWNER_DATA_VOLUME_UUID, &device, device_path,
+ 	    sizeof(device_path), &base, &size, native_owner_data_seed_sha256)) { error = ENOENT; goto done; }
+@@ -9898,6 +9960,8 @@
+ 	SHA256_Update(&context, (const void *)base, size);
+ 	SHA256_Final(native_owner_data_seed_sha256, &context);
+ #endif
++	}
++
+ 	native_owner_data_seed_base = base;
+ 	native_owner_data_seed_size = size;
+ 	native_owner_data_stage = 1;
+@@ -9940,15 +10004,15 @@
+ 		extern volatile int native_owner_rosv_state;
+ 		native_owner_rosv_state = 2;
+ 	}
+-	if (!error) native_owner_macos_hardware_volume(p, scratch);
+-	if (!error) native_owner_macos_vm_volume(p, scratch);
+-	if (!error) native_owner_macos_cryptex_view(p, scratch);
++	if (!error && !native_apfs) native_owner_macos_hardware_volume(p, scratch);
++	if (!error && !native_apfs) native_owner_macos_vm_volume(p, scratch);
++	if (!error && !native_apfs) native_owner_macos_cryptex_view(p, scratch);
+ #ifdef XNU_OWNER_APP_VOLUME_UUID
+-	if (!error) native_owner_macos_app_cryptex(p, scratch);
++	if (!error && !native_apfs) native_owner_macos_app_cryptex(p, scratch);
+ #endif
+ 	if (!error) native_owner_macos_gpu_addon(p, scratch);
+ 	if (!error) native_owner_macos_addon_sbin(p, scratch);
+-	if (!error) native_owner_macos_boot_shims(p, scratch);
++	if (!error && !native_apfs) native_owner_macos_boot_shims(p, scratch);
+ 	if (!error) native_gpu_addon_release();
+ done:
+ 	if (data_root) vnode_put(data_root);
+--- a/iokit/bsddev/IOKitBSDInit.cpp
++++ b/iokit/bsddev/IOKitBSDInit.cpp
+@@ -588,10 +588,13 @@
+ native_owner_publish_boot_manifest(dev_t rootDevice, const char *rootUUID,
+     dev_t cacheDevice, const char *cacheUUID)
+ {
+-	static const char domain[] = "VerifiedRoot.OwnerBootSet.v1";
++	int native_apfs = 0;
++	PE_parse_boot_argn("native-apfs-root", &native_apfs, sizeof(native_apfs));
++	const bool native_root = native_apfs == 1 && rootUUID && cacheUUID && !strcmp(rootUUID, cacheUUID);
++	const char *domain = native_root ? "UnsealedAPFS.OwnerBootSet.v1" : "VerifiedRoot.OwnerBootSet.v1";
+ 	uint8_t rootDigest[48], cacheDigest[48], digest[48];
+ 	uint8_t rootRole = 1, cacheRole = 2;
+-	if (rootDevice == cacheDevice ||
++	if ((rootDevice == cacheDevice && !native_root) ||
+ 	    !native_verified_block_manifest_sha384(rootDevice, rootUUID, rootDigest) ||
+ 	    !native_verified_block_manifest_sha384(cacheDevice, cacheUUID, cacheDigest)) {
+ 		native_owner_boot_manifest_status = 1;
+@@ -599,7 +602,7 @@
+ 	}
+ 	SHA384_CTX context;
+ 	SHA384_Init(&context);
+-	SHA384_Update(&context, domain, sizeof(domain));
++	SHA384_Update(&context, domain, static_cast<unsigned>(strlen(domain) + 1));
+ 	SHA384_Update(&context, &rootRole, sizeof(rootRole));
+ 	SHA384_Update(&context, rootDigest, sizeof(rootDigest));
+ 	SHA384_Update(&context, &cacheRole, sizeof(cacheRole));
+@@ -614,7 +617,7 @@
+ 		return 0;
+ 	}
+ 	OSData *value = OSData::withBytes(digest, sizeof(digest));
+-	OSData *tag = OSData::withBytes(domain, sizeof(domain));
++	OSData *tag = OSData::withBytes(domain, static_cast<unsigned>(strlen(domain) + 1));
+ 	bool tagged = tag && chosen->setProperty("owner-boot-manifest-domain", tag);
+ 	bool published = tagged && value && chosen->setProperty("boot-manifest-hash", value);
+ 	uint8_t actual[48];

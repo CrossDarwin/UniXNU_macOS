@@ -6,21 +6,21 @@ Keep the system image cache in the VM and place the Linux output on a data disk.
 
 ## Build the container
 
-Use Python 3 on macOS. Prepare the decrypted `OS`, `Cryptex1,SystemOS`, and
+Use Python 3 and rsync 3 on macOS. Prepare the decrypted `OS`, `Cryptex1,SystemOS`, and
 `Cryptex1,AppOS` images from the same restore build. Pass the source APFS
 volume UUIDs when an image has more than one volume.
 
 ```sh
-sudo python3 scripts/sheng-apfs/make-container.py --size-gib 32 \
+sudo python3 scripts/sheng-apfs/make-container.py --size-gib 32 --without-xart \
+  --rsync /path/to/rsync \
   --system /path/to/OS.dmg --system-os /path/to/SystemOS.dmg \
   --app-os /path/to/AppOS.dmg /path/to/apfs-container
 ```
 
-The build copies the System volume and dyld cache, seeds Data, and stages
-AppOS under Preboot. It checks the container with `fsck_apfs -n` and exports
-`container.apfs` and `container.json`. Allow space for both the working image
-and the exported container. Build with `--fixture --size-gib 4` to use empty
-volumes.
+The build copies System, the arm64e shared cache, the Data template, and AppOS.
+It checks the container with `fsck_apfs -n` and writes `container.apfs` and
+`container.json`. Repeat the same command after a failure to resume copying.
+Build with `--fixture --size-gib 4` to use empty volumes.
 
 ## Add xART offline
 
@@ -31,7 +31,7 @@ with its pinned apfsprogs dependency. Run it on a copy of the raw container.
 
 ```sh
 mkdir with-xart
-cp --sparse=always apfs-container/container.apfs with-xart/container.apfs
+cp --reflink=auto --sparse=always apfs-container/container.apfs with-xart/container.apfs
 python3 "$DROIDVM/scripts/apfs-add-volumes.py" add with-xart/container.apfs xART:X
 ```
 
@@ -67,10 +67,24 @@ The command produces:
 | `SHA256SUMS` | Package checksums |
 
 Use `--raw-only` before `--partition-bytes` to omit the fastboot image.
+Use `--raw-only --link-raw` when both directories are on the same filesystem
+and the source should share storage with `rootfs.img`. Keep the linked image
+read-only during boot tests by using a QEMU overlay.
 
-## Boot requirements
+## Build the matching boot image
 
-Keep this package off the tablet until the sheng UFS driver can publish the
-single writable container and the boot payload can authenticate and select
-its System volume. The current `boot.img` expects the legacy `SHNGROOT`
-layout. A matching APFS `boot.img` and `payload.img` are pending.
+Use the sheng macOS build workspace with the prepared trust bundle and GPU addon.
+The writable backend uses ShengUfs revision
+`57f031c99d7f69ffa611626bebaeab0731e93254`.
+
+```sh
+export UNIXNU_APFS_CONTAINER=/path/to/with-xart/container.json
+./unixnu build kernel payload --os macos-27 --device ../device --uefi ../uefi-sheng
+./unixnu bootimg --os macos-27 --device ../device --uefi ../uefi-sheng
+```
+
+The kernel binds the container size and UUID. The payload binds the System and
+Data volume UUIDs. System mounts read-only, with the dyld cache in that volume.
+The APFS backend provides writable Data and reserves the end of `userdata`
+for diagnostics. This development image has no System volume seal or per-block
+signature verification. Installing it replaces the existing `userdata` layout.
