@@ -2,6 +2,7 @@
 """Build a sheng APFS container on macOS from prepared restore image components."""
 
 import argparse
+import hashlib
 import json
 import os
 import plistlib
@@ -11,7 +12,7 @@ import tempfile
 from contextlib import contextmanager
 from pathlib import Path
 
-from image import export, geometry
+from image import CHUNK, export, geometry
 
 
 def run(*args):
@@ -131,6 +132,55 @@ def volume_group(container):
     return entries[0]
 
 
+@contextmanager
+def checked_container(disk):
+    with attached(disk, readonly=True) as devices:
+        info = container_for(devices)
+        group = volume_group(info['ContainerReference'])
+        raw = '/dev/r' + info['PhysicalStores'][0]['DeviceIdentifier']
+        run('/sbin/fsck_apfs', '-n', raw)
+        volumes = {row['Name']: {'uuid': row['APFSVolumeUUID'], 'roles': row['Roles']}
+                   for row in info['Volumes']}
+        members = {row['Role']: row['DiskUUID'] for row in group['Volumes']}
+        if members != {name: volumes[name]['uuid'] for name in ('System', 'Data')}:
+            raise ValueError('System and Data do not match the APFS volume group')
+        with open(raw, 'rb', buffering=0) as handle:
+            size, container_uuid = geometry(handle)
+            yield {'bytes': size, 'container_uuid': container_uuid,
+                   'volume_group_uuid': group['APFSVolumeGroupUUID'],
+                   'system_uuid': volumes['System']['uuid'], 'volumes': volumes}, handle
+
+
+def verify_xart(baseline, directory):
+    before = json.loads(baseline.read_text())
+    if before['format'] != 'sheng-apfs-v1' or 'xART' in before['volumes']:
+        raise ValueError('Expected the original container manifest without xART')
+    disk = directory / 'container.apfs'
+    receipt = directory / 'container.json'
+    if receipt.exists() or receipt.is_symlink():
+        raise ValueError('Verify the modified image in a directory without container.json')
+
+    with checked_container(disk) as (layout, _):
+        volumes = dict(layout['volumes'])
+        xart = volumes.pop('xART', None)
+        if not xart or xart['roles'] != ['xART']:
+            raise ValueError('The added volume does not have the xART role')
+        if volumes != before['volumes']:
+            raise ValueError('Existing APFS volume identities or roles changed')
+        keys = ('bytes', 'container_uuid', 'volume_group_uuid', 'system_uuid')
+        if any(layout[key] != before[key] for key in keys) or disk.stat().st_size != layout['bytes']:
+            raise ValueError('APFS geometry or System/Data group identity changed')
+        print(f'Hashing {disk.name} - {layout["bytes"] / 2**30:.2f} GiB', flush=True)
+        digest = hashlib.sha256()
+        with disk.open('rb') as handle:
+            for data in iter(lambda: handle.read(CHUNK), b''):
+                digest.update(data)
+
+    with receipt.open('x') as handle:
+        handle.write(json.dumps({**before, **layout, 'sha256': digest.hexdigest()}, indent=2) + '\n')
+    print(f'Verified xART {xart["uuid"]} - {receipt}', flush=True)
+
+
 def make_container(args, output):
     with tempfile.TemporaryDirectory(prefix='.apfs-', dir=output.parent) as work:
         stage = Path(work)
@@ -152,24 +202,10 @@ def make_container(args, output):
             if not args.fixture:
                 populate(args, system, data, preboot)
 
-        with attached(disk, readonly=True) as devices:
-            info = container_for(devices)
-            group = volume_group(info['ContainerReference'])
-            raw = '/dev/r' + info['PhysicalStores'][0]['DeviceIdentifier']
-            run('/sbin/fsck_apfs', '-n', raw)
-            with open(raw, 'rb', buffering=0) as handle:
-                size, container_uuid = geometry(handle)
-                digest = export(handle, stage / 'container.apfs', size)
-
-        volumes = {row['Name']: {'uuid': row['APFSVolumeUUID'], 'roles': row['Roles']}
-                   for row in info['Volumes']}
-        members = {row['Role']: row['DiskUUID'] for row in group['Volumes']}
-        if members != {name: volumes[name]['uuid'] for name in ('System', 'Data')}:
-            raise ValueError('System and Data do not match the APFS volume group')
+        with checked_container(disk) as (layout, handle):
+            digest = export(handle, stage / 'container.apfs', layout['bytes'])
         metadata = {'format': 'sheng-apfs-v1', 'profile': args.profile, 'fixture': args.fixture,
-                    'bytes': size, 'sha256': digest, 'container_uuid': container_uuid,
-                    'volume_group_uuid': group['APFSVolumeGroupUUID'],
-                    'system_uuid': volumes['System']['uuid'], 'volumes': volumes}
+                    **layout, 'sha256': digest}
         (stage / 'container.json').write_text(json.dumps(metadata, indent=2) + '\n')
         disk.unlink()
         stage.rename(output)
@@ -177,8 +213,10 @@ def make_container(args, output):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('output', type=Path, help='New directory for container.apfs and container.json')
-    parser.add_argument('--size-gib', type=int, required=True)
+    parser.add_argument('output', type=Path, help='Container directory')
+    parser.add_argument('--size-gib', type=int)
+    parser.add_argument('--verify-xart', metavar='BASELINE_JSON', type=Path,
+                        help='Verify an offline xART addition and write a new container.json')
     parser.add_argument('--profile', default='macos-27.3-26C5035r')
     parser.add_argument('--fixture', action='store_true', help='Create an empty test volume group')
     parser.add_argument('--without-xart', action='store_true', help='Omit xART for a test on hosts that cannot create it')
@@ -189,13 +227,21 @@ def main():
     images = (args.system, args.system_os, args.app_os)
     if sys.platform != 'darwin':
         parser.error('APFS volume creation needs macOS')
-    if args.size_gib < (4 if args.fixture else 24):
+    output = args.output.absolute()
+    if args.verify_xart:
+        if args.size_gib is not None or args.fixture or args.without_xart or any(images):
+            parser.error('--verify-xart requires only the baseline and modified container directory')
+        try:
+            verify_xart(args.verify_xart, output)
+        except (OSError, ValueError, KeyError, subprocess.CalledProcessError) as error:
+            sys.exit(f'xART verification failed: {error}')
+        return
+    if args.size_gib is None or args.size_gib < (4 if args.fixture else 24):
         parser.error('Use at least 4 GiB for a fixture or 24 GiB for system images')
     if args.fixture and any(images):
         parser.error('--fixture cannot be combined with system images')
     if not args.fixture and (not all(p and p.is_file() for p in images) or os.geteuid() != 0):
         parser.error('System builds need the three image files and root privileges to preserve ownership')
-    output = args.output.absolute()
     if output.exists() or output.is_symlink() or not output.parent.is_dir():
         parser.error('Use a new output directory under an existing parent')
     try:

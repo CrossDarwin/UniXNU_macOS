@@ -20,8 +20,29 @@ The build copies the System volume and dyld cache, seeds Data, and stages
 AppOS under Preboot. It checks the container with `fsck_apfs -n` and exports
 `container.apfs` and `container.json`. Allow space for both the working image
 and the exported container. Build with `--fixture --size-gib 4` to use empty
-volumes. The Intel macOS VM used for this experiment requires
-`--without-xart`; its APFS tools return error `-69624` when adding that role.
+volumes.
+
+## Add xART offline
+
+If macOS reports `-69624` when creating xART, build with `--without-xart` and
+keep the original `container.json`. On Linux, use the
+[DroidVM APFS tool](https://github.com/Droid-VM/macOS-DroidVM/blob/9db2f6f263173b660536530c2d102f480280cdb3/scripts/apfs-add-volumes.py)
+with its pinned apfsprogs dependency. Run it on a copy of the raw container.
+
+```sh
+mkdir with-xart
+cp --sparse=always apfs-container/container.apfs with-xart/container.apfs
+python3 "$DROIDVM/scripts/apfs-add-volumes.py" add with-xart/container.apfs xART:X
+```
+
+Copy `with-xart` to macOS for verification. The command checks the filesystem,
+the xART role, and the existing volume identities before writing a new
+`container.json`. Use both files from `with-xart` for packaging.
+
+```sh
+python3 scripts/sheng-apfs/make-container.py \
+  --verify-xart apfs-container/container.json with-xart
+```
 
 ## Package on Linux
 
