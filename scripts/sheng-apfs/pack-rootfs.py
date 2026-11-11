@@ -13,7 +13,7 @@ sys.path.insert(0, str(Path('tools/sheng-apfs').resolve()))
 from image import export, geometry
 
 
-def pack(input_dir, output, partition_bytes, raw_only):
+def pack(input_dir, output, partition_bytes, raw_only, link_raw=False):
     manifest = json.loads((input_dir / 'container.json').read_text())
     if manifest['format'] != 'sheng-apfs-v1':
         raise ValueError('Unexpected container manifest format')
@@ -27,9 +27,13 @@ def pack(input_dir, output, partition_bytes, raw_only):
             raise ValueError('APFS geometry disagrees with the file or manifest')
         if container_uuid != manifest['container_uuid']:
             raise ValueError('APFS container UUID disagrees with the manifest')
-        if partition_bytes % 4096 or size > partition_bytes:
-            raise ValueError('Container does not fit the 4 KiB-aligned target partition')
-        digest = export(handle, raw, size)
+        if partition_bytes % 4096 or size > partition_bytes - 2**30:
+            raise ValueError('Container and 1 GiB diagnostic reserve do not fit the target partition')
+        if link_raw:
+            print(f'Verifying linked raw container - {size / 2**30:.2f} GiB', flush=True)
+            digest = hashlib.file_digest(handle, 'sha256').hexdigest()
+        else:
+            digest = export(handle, raw, size)
         if digest != manifest['sha256']:
             raise ValueError('APFS image SHA-256 disagrees with the manifest')
 
@@ -57,6 +61,6 @@ def pack(input_dir, output, partition_bytes, raw_only):
 if __name__ == '__main__':
     try:
         pack(Path('inputs'), Path(os.environ['OUTPUTDIR']), int(os.environ['APFS_PARTITION_BYTES']),
-             os.environ['APFS_RAW_ONLY'] == '1')
+             os.environ['APFS_RAW_ONLY'] == '1', os.environ.get('APFS_LINK_RAW') == '1')
     except (OSError, ValueError, KeyError) as error:
         sys.exit(f'APFS packaging failed: {error}')
