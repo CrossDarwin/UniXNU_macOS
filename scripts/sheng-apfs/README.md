@@ -10,6 +10,9 @@ Use Python 3 and rsync 3 on macOS. Prepare the decrypted `OS`, `Cryptex1,SystemO
 `Cryptex1,AppOS` images from the same restore build. Pass the source APFS
 volume UUIDs when an image has more than one volume.
 
+The build VM must allow unrestricted filesystem access so root can preserve BSD
+restricted flags and rootless attributes. The command tests this before copying.
+
 ```sh
 sudo python3 scripts/sheng-apfs/make-container.py --size-gib 32 --without-xart \
   --rsync /path/to/rsync \
@@ -18,9 +21,21 @@ sudo python3 scripts/sheng-apfs/make-container.py --size-gib 32 --without-xart \
 ```
 
 The build copies System, the arm64e shared cache, the Data template, and AppOS.
-It checks the container with `fsck_apfs -n` and writes `container.apfs` and
+It restores ownership, modes, BSD flags and rootless attributes from all three
+source volumes. It checks the container with `fsck_apfs -n` and writes `container.apfs` and
 `container.json`. Repeat the same command after a failure to resume copying.
 Build with `--fixture --size-gib 4` to use empty volumes.
+
+To repair an existing container's metadata, pass its original source images.
+The command creates an APFS clone in a new output directory and verifies the
+volume identities and filesystem before writing a new receipt.
+
+```sh
+sudo python3 scripts/sheng-apfs/make-container.py \
+  --repair-metadata /path/to/with-xart \
+  --system /path/to/OS.dmg --system-os /path/to/SystemOS.dmg \
+  --app-os /path/to/AppOS.dmg /path/to/repaired-container
+```
 
 ## Add xART offline
 
@@ -87,7 +102,7 @@ The kernel binds the container size and UUID. The payload binds the System and
 Data volume UUIDs. System mounts read-only, with the dyld cache in that volume.
 The APFS backend provides writable Data and reserves the end of `userdata`
 for diagnostics. This development image has no System volume seal or per-block
-signature verification. Copies made on a SIP-enabled build host lose restricted
-file flags. This profile permits dyld cache mapping only from the bound read-only
-System volume at `/System/Library/dyld`; signature validation remains enabled.
+signature verification. This profile also accepts older development images whose
+dyld cache lost restricted flags, limited to the bound read-only System volume
+at `/System/Library/dyld`; signature validation remains enabled.
 Installing it replaces the existing `userdata` layout.

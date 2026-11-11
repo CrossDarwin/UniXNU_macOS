@@ -10,10 +10,11 @@ import shutil
 import subprocess
 import sys
 import time
-from contextlib import contextmanager
+from contextlib import ExitStack, contextmanager
 from pathlib import Path
 
 from image import geometry, hash_image
+from metadata import check_file_flags, restore_metadata
 
 
 def run(*args):
@@ -159,6 +160,33 @@ def populate(args, system, data, preboot, stage):
                 copy_contents(source, cryptex_paths(target) / 'App')
         app_done.touch()
 
+    restore_all_metadata(args, system, data, preboot, stage)
+
+
+def restore_all_metadata(args, system, data, preboot, stage):
+    metadata_done = stage / 'metadata-v1.json'
+    if not metadata_done.exists():
+        restored = {}
+        with ExitStack() as stack:
+            sources = {name: stack.enter_context(source_volume(getattr(args, name),
+                                                               getattr(args, name + '_uuid')))
+                       for name in ('system', 'system_os', 'app_os')}
+            for name, source in sources.items():
+                with mounted(system) as target:
+                    destination = (cryptex_paths(target / 'System/Volumes/Preboot') / 'App'
+                                   if name == 'app_os' else target)
+                    restored[name] = restore_metadata(source, destination,
+                                                      sources['system_os'] if name == 'system' else None)
+                if name == 'system':
+                    with mounted(data) as target:
+                        restored['data'] = restore_metadata(source / 'System/Library/Templates/Data', target)
+                        for relative in ('private/tmp', 'private/var/tmp'):
+                            (target / relative).chmod(0o1777)
+                if name == 'app_os':
+                    with mounted(preboot) as target:
+                        restored['preboot_app'] = restore_metadata(source, cryptex_paths(target) / 'App')
+        metadata_done.write_text(json.dumps(restored, indent=2) + '\n')
+
 
 def volume_group(container):
     groups = plist('diskutil', 'apfs', 'listVolumeGroups', '-plist', container)
@@ -220,6 +248,51 @@ def verify_xart(baseline, directory):
     with receipt.open('x') as handle:
         handle.write(json.dumps({**before, **layout, 'sha256': digest}, indent=2) + '\n')
     print(f'Verified xART {xart["uuid"]} - {receipt}', flush=True)
+
+
+def repair_metadata(args, output):
+    baseline = args.repair_metadata.resolve()
+    before = json.loads((baseline / 'container.json').read_text())
+    source_disk = baseline / 'container.apfs'
+    if before['format'] != 'sheng-apfs-v1' or before['fixture']:
+        raise ValueError('Metadata repair requires a populated sheng APFS container')
+    if source_disk.stat().st_size != before['bytes']:
+        raise ValueError('Baseline image size does not match its receipt')
+    stage = output.with_name('.' + output.name + '.incomplete')
+    stage.mkdir(mode=0o700, exist_ok=True)
+    with output.with_name('.' + output.name + '.lock').open('a') as guard:
+        fcntl.flock(guard, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        inputs = {'baseline': str(baseline), 'receipt': before, 'images': {}}
+        for name in ('system', 'system_os', 'app_os'):
+            source = getattr(args, name)
+            info = source.stat()
+            inputs['images'][name] = [str(source.resolve()), info.st_size, info.st_mtime_ns,
+                                      getattr(args, name + '_uuid')]
+        checkpoint = stage / 'inputs.json'
+        if checkpoint.exists() and json.loads(checkpoint.read_text()) != inputs:
+            raise ValueError(f'Repair inputs changed: {stage}')
+        checkpoint.write_text(json.dumps(inputs, indent=2) + '\n')
+        disk = stage / 'container.apfs'
+        if not disk.exists():
+            # A clone preserves the baseline and avoids allocating another full restore image.
+            run('/bin/cp', '-c', source_disk, disk)
+        with attached(disk) as devices:
+            container = container_for(devices)['ContainerReference']
+            volumes = {name: volume(container, uuid=before['volumes'][name]['uuid'])
+                       for name in ('System', 'Data', 'Preboot')}
+            restore_all_metadata(args, volumes['System'], volumes['Data'], volumes['Preboot'], stage)
+        with checked_container(disk) as layout:
+            if any(layout[key] != before[key] for key in layout):
+                raise ValueError('Metadata repair changed the APFS volume identities')
+            digest = image_hash(disk)
+        receipt = stage / 'container.json'
+        receipt.write_text(json.dumps({**before, 'sha256': digest, 'metadata_restored': True}, indent=2) + '\n')
+        if os.environ.get('SUDO_UID') and os.environ.get('SUDO_GID'):
+            uid, gid = int(os.environ['SUDO_UID']), int(os.environ['SUDO_GID'])
+            for path in (disk, receipt, stage):
+                os.chown(path, uid, gid)
+        stage.rename(output)
+    print(f'Metadata repair complete - {output}', flush=True)
 
 
 def make_container(args, output):
@@ -301,6 +374,8 @@ def main():
     parser.add_argument('--size-gib', type=int)
     parser.add_argument('--verify-xart', metavar='BASELINE_JSON', type=Path,
                         help='Verify an offline xART addition and write a new container.json')
+    parser.add_argument('--repair-metadata', metavar='BASELINE_DIRECTORY', type=Path,
+                        help='Clone an existing container and restore metadata from its source images')
     parser.add_argument('--profile', default='macos-27.3-26C5035r')
     parser.add_argument('--fixture', action='store_true', help='Create an empty test volume group')
     parser.add_argument('--without-xart', action='store_true', help='Omit xART for a test on hosts that cannot create it')
@@ -314,20 +389,22 @@ def main():
         parser.error('APFS volume creation needs macOS')
     output = args.output.absolute()
     if args.verify_xart:
-        if args.size_gib is not None or args.fixture or args.without_xart or any(images):
+        if args.size_gib is not None or args.fixture or args.without_xart or any(images) or args.repair_metadata:
             parser.error('--verify-xart requires only the baseline and modified container directory')
         try:
             verify_xart(args.verify_xart, output)
         except (OSError, ValueError, KeyError, subprocess.CalledProcessError) as error:
             sys.exit(f'xART verification failed: {error}')
         return
-    if args.size_gib is None or args.size_gib < (4 if args.fixture else 24):
+    if args.repair_metadata and (args.fixture or args.size_gib is not None or args.without_xart):
+        parser.error('--repair-metadata requires the baseline, three source images and a new output directory')
+    if not args.repair_metadata and (args.size_gib is None or args.size_gib < (4 if args.fixture else 24)):
         parser.error('Use at least 4 GiB for a fixture or 24 GiB for system images')
     if args.fixture and any(images):
         parser.error('--fixture cannot be combined with system images')
     if not args.fixture and (not all(p and p.is_file() for p in images) or os.geteuid() != 0):
         parser.error('System builds need the three image files and root privileges to preserve ownership')
-    if not args.fixture:
+    if not args.fixture and not args.repair_metadata:
         rsync = args.rsync or shutil.which('rsync')
         if not rsync:
             parser.error('Install rsync 3 and pass --rsync /path/to/rsync')
@@ -338,7 +415,12 @@ def main():
     if output.exists() or output.is_symlink() or not output.parent.is_dir():
         parser.error('Use a new output directory under an existing parent')
     try:
-        make_container(args, output)
+        if not args.fixture:
+            check_file_flags(output.parent)
+        if args.repair_metadata:
+            repair_metadata(args, output)
+        else:
+            make_container(args, output)
     except (OSError, ValueError, KeyError, subprocess.CalledProcessError) as error:
         sys.exit(f'APFS build failed: {error}')
 
