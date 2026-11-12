@@ -231,4 +231,6 @@ access can use the same runner structure with ADB commands.
 **Result:** each test produces an identifiable evidence directory and a recorded
 return path. Continue the remaining [bring-up stages](/porting/bring-up).
 
+On sheng, display-property rows use an immutable snapshot captured during display registration. The periodic log writer does not serialize the live display registry. Frame and error counters continue to update.
+
 The BCM2837 build configuration sizes the vnode cache from usable memory with the standard medium cap. A 1024-vnode cap caused repeated `vnode: table is full` messages during the QEMU macOS boot test.
