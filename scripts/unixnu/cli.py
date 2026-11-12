@@ -37,6 +37,7 @@ def common():
     p.add_argument('--data-ramdisk', metavar='FILE', help='preserved Data ramdisk seed for this installation')
     p.add_argument('--init-data', action='store_true', help='create and retain a new Data seed from the IPSW for a FIRST installation; requires kernel build')
     p.add_argument('--gpu-addon', metavar='FILE', help='GPU addon file (scripts/make-gpu-addon.py) the kernel writes into the Data volume at boot')
+    p.add_argument('--runtime-dir', metavar='DIR', help='use the complete native APFS runtime pair from DIR/generated.json')
     p.add_argument('--unique-chip-id', metavar='HEX', help='platform seed for the device tree; or UNIXNU_UNIQUE_CHIP_ID')
     p.add_argument('--ipsw', metavar='PATH_OR_URL', help='the target IPSW: a local file or an https URL (default: url of board.toml [ipsw]); or UNIXNU_IPSW')
     p.add_argument('--dry-run', action='store_true', help='userdata: check sizes and pins, write nothing')

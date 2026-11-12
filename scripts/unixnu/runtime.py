@@ -37,12 +37,30 @@ def prepare(ctx, kernel_build=False):
         args = ctx.args
         if getattr(args, 'data_ramdisk', None) or getattr(args, 'init_data', False) or getattr(args, 'skip_setup', False):
             raise Error('Native APFS Data is prepared by make-container.py')
-        for name, filename in (('owner_trust_cache', 'owner-trust.bundle'), ('gpu_addon', 'gpuaddon.bin')):
-            path = Path(getattr(args, name, None) or ctx.work / 'runtime' / filename).expanduser().resolve()
+        owner = getattr(args, 'owner_trust_cache', None)
+        addon = getattr(args, 'gpu_addon', None)
+        directory = getattr(args, 'runtime_dir', None)
+        if getattr(args, 'trust_cache', None) or bool(owner) != bool(addon) or (directory and addon):
+            raise Error('Use --runtime-dir or pass both --gpu-addon and --owner-trust-cache')
+        if addon:
+            inputs = {'owner_trust_cache': owner, 'gpu_addon': addon}
+            # A runtime directory contains intermediate addons as well as its final output.
+            report = Path(addon).expanduser().resolve().parent / 'generated.json'
+            if report.is_file() and native_runtime_inputs(report) != {
+                key: Path(path).expanduser().resolve() for key, path in inputs.items()
+            }:
+                raise Error(f'Use the completed addon and trust pair from {report}')
+        else:
+            report = (Path(directory).expanduser() if directory else ctx.work / 'runtime') / 'generated.json'
+            inputs = native_runtime_inputs(report)
+        for name, value in inputs.items():
+            path = Path(value).expanduser().resolve()
             if not path.is_file():
                 raise Error(f'Native APFS boot requires the prepared runtime input {path}')
             setattr(args, name, str(path))
         return
+    if getattr(ctx.args, 'runtime_dir', None):
+        raise Error('--runtime-dir is available for native APFS builds')
     spec = ctx.board.get('payload', {}).get('runtime')
     if not spec or not spec.get('enabled', True):
         from .payload import check_data_input
@@ -138,3 +156,12 @@ def prepare(ctx, kernel_build=False):
     (out / 'inputs.json').write_text(json.dumps(dict(inputs=inputs, data_volume_uuid=identity), indent=2) + '\n')
     log(f'runtime: Data UUID {identity}; preserved seed sha256 {inputs["data_ramdisk"]["sha256"]}')
     ctx._runtime_prepared = True
+
+
+def native_runtime_inputs(report):
+    try:
+        generated = json.loads(report.read_text())
+        return {'owner_trust_cache': Path(generated['trust_cache']).expanduser().resolve(),
+                'gpu_addon': Path(generated['gpu_addon']).expanduser().resolve()}
+    except (OSError, ValueError, KeyError, TypeError) as error:
+        raise Error(f'Cannot read the completed native APFS runtime from {report}: {error}') from error
