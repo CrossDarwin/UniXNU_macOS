@@ -47,7 +47,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           repository: UniXNU/UniXNU-sheng
-          ref: b9223ad4020a669b1e62b11fb46c8fbcbafd9b1d
+          ref: cd73e23f0657c28a6638f165590d04f71ab76419
           path: device
       - name: Select device dependencies
         run: python3 scripts/ci/sheng_sources.py --device ../device
