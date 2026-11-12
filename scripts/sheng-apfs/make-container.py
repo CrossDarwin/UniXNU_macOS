@@ -15,6 +15,7 @@ from pathlib import Path
 
 from image import geometry, hash_image
 from metadata import check_file_flags, restore_metadata
+from xart import assign_role
 
 
 def run(*args):
@@ -72,6 +73,25 @@ def volume(container, *, name=None, uuid=None):
 def add(container, name, role, *options):
     run('diskutil', 'apfs', 'addVolume', container, 'APFS', name, '-role', role, '-nomount', *options)
     return volume(container, name=name)
+
+
+def prepare_xart(container, existing):
+    if existing is None:
+        result = subprocess.run(['diskutil', 'apfs', 'addVolume', container, 'APFS',
+                                 'xART', '-role', 'X', '-nomount'],
+                                stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+        print(result.stdout, end='', flush=True)
+        if not result.returncode:
+            return None
+        if '-69624' not in result.stdout:
+            result.check_returncode()
+        print('Creating an empty volume for offline xART role assignment', flush=True)
+        add(container, 'xART', '0')
+        volumes = plist('diskutil', 'apfs', 'list', '-plist', container)['Containers'][0]['Volumes']
+        existing, = [row for row in volumes if row['Name'] == 'xART']
+    if existing['Roles'] not in ([], ['xART']):
+        raise ValueError('Unexpected role on the staged xART volume')
+    return existing['APFSVolumeUUID'] if not existing['Roles'] else None
 
 
 @contextmanager
@@ -333,16 +353,16 @@ def make_container(args, output):
         with attached(disk) as devices:
             info = container_for(devices)
             container = info['ContainerReference']
-            existing = {row['Name']: row['DeviceIdentifier'] for row in info['Volumes']}
+            existing = {row['Name']: row for row in info['Volumes']}
 
             def ensure(name, role, *options):
-                return existing.get(name) or add(container, name, role, *options)
+                return existing[name]['DeviceIdentifier'] if name in existing else add(container, name, role, *options)
 
             data = ensure('Data', 'D')
-            system = ensure('System', 'S', '-groupWith', data)
+            ensure('System', 'S', '-groupWith', data)
             if 'UnixnuScratch' in existing:
-                run('diskutil', 'apfs', 'deleteVolume', existing['UnixnuScratch'])
-            preboot = ensure('Preboot', 'B')
+                run('diskutil', 'apfs', 'deleteVolume', existing['UnixnuScratch']['DeviceIdentifier'])
+            ensure('Preboot', 'B')
             ensure('VM', 'V')
             # diskutil may omit Update from its volume list even when it exists.
             update = stage / 'update-created'
@@ -350,12 +370,24 @@ def make_container(args, output):
                 ensure('Update', 'E')
                 update.touch()
             ensure('Hardware', 'H')
-            if not args.without_xart:
-                ensure('xART', 'X')
-            if not args.fixture:
+            xart_uuid = None if args.without_xart else prepare_xart(container, existing.get('xART'))
+
+        if xart_uuid:
+            with disk.open('rb') as handle:
+                _, container_uuid = geometry(handle)
+            assign_role(disk, container_uuid, xart_uuid)
+
+        if not args.fixture:
+            with attached(disk) as devices:
+                container = container_for(devices)['ContainerReference']
+                system, data, preboot = (volume(container, name=name) for name in ('System', 'Data', 'Preboot'))
                 populate(args, system, data, preboot, stage)
 
         with checked_container(disk) as layout:
+            if not args.without_xart and layout['volumes'].get('xART', {}).get('roles') != ['xART']:
+                raise ValueError('Expected an xART volume in the verified container')
+            if xart_uuid and layout['volumes']['xART']['uuid'] != xart_uuid:
+                raise ValueError('Offline role assignment changed the xART volume identity')
             digest = image_hash(disk)
         metadata = {'format': 'sheng-apfs-v1', 'profile': args.profile, 'fixture': args.fixture,
                     **layout, 'sha256': digest}

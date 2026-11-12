@@ -1,10 +1,55 @@
 # sheng APFS images
 
-This experiment builds a native APFS System/Data volume group for sheng. Use
-macOS to create and check the container, then use mkosi on Linux to package it.
-Keep the system image cache in the VM and place the Linux output on a data disk.
+Build a native APFS System/Data volume group and its matching boot images for
+sheng. The default workflow runs on macOS. Linux with mkosi is available for
+the root filesystem packaging step.
 
-## Build the container
+## Build the images
+
+Use the sheng macOS build environment with Python 3.11 or newer, rsync 3, the
+Apple SDKs and the sheng and uefi-sheng checkouts. Set `UNIXNU_UNIQUE_CHIP_ID`
+in the private build environment. Use an APFS work directory with room for
+the decrypted IPSW components, APFS container and fastboot image.
+
+```sh
+python3 scripts/sheng-apfs/build-images.py \
+  --device ../device --uefi ../uefi-sheng /path/to/sheng-images
+```
+
+The command extracts and decrypts the selected IPSW, creates and checks the
+container, builds the runtime and boot images, and packages the root
+filesystem. Enter the administrator password at the APFS creation step if
+sudo prompts for it. Use `--ipsw PATH_OR_URL` to provide the pinned IPSW
+yourself or `--rsync PATH` to select rsync 3.
+
+Use `--user rinnrei --display-name RinnRei --auto-login` to provision a local
+administrator and skip Setup Assistant. Enter the account password at the
+prompt. Keep that workspace private.
+
+The workspace contains `boot/boot.img`, `boot/payload.img`, `rootfs/rootfs.img`,
+and `rootfs/rootfs.fastboot.img`. Verify the package from the workspace with
+`shasum -a 256 -c SHA256SUMS`. Installing the root filesystem replaces
+`userdata`.
+
+Use `--boot-template DIR` to reuse a verified sheng transport. The directory
+must contain the version 0 `boot.img` and its `boot.json`. Use
+`--runtime-dir DIR` to reuse an existing matched GPU addon and trust bundle.
+
+If packaging fails after the boot build, retry the last step:
+
+```sh
+python3 scripts/sheng-apfs/build-images.py --pack-only /path/to/sheng-images
+```
+
+To use mkosi, run the macOS command with `--prepare-only`, transfer the
+workspace with sparse files preserved, and run this on Linux with mkosi
+26 or newer:
+
+```sh
+python3 scripts/sheng-apfs/build-images.py --use-mkosi /path/to/sheng-images
+```
+
+## Build the container separately
 
 Use Python 3 and rsync 3 on macOS. Prepare the decrypted `OS`, `Cryptex1,SystemOS`, and
 `Cryptex1,AppOS` images from the same restore build. Pass the source APFS
@@ -14,7 +59,7 @@ The build VM must allow unrestricted filesystem access so root can preserve BSD
 restricted flags and rootless attributes. The command tests this before copying.
 
 ```sh
-sudo python3 scripts/sheng-apfs/make-container.py --size-gib 32 --without-xart \
+sudo python3 scripts/sheng-apfs/make-container.py --size-gib 32 \
   --rsync /path/to/rsync \
   --system /path/to/OS.dmg --system-os /path/to/SystemOS.dmg \
   --app-os /path/to/AppOS.dmg /path/to/apfs-container
@@ -37,10 +82,11 @@ sudo python3 scripts/sheng-apfs/make-container.py \
   --app-os /path/to/AppOS.dmg /path/to/repaired-container
 ```
 
-## Add xART offline
+## Add xART to an existing container
 
-If macOS reports `-69624` when creating xART, build with `--without-xart` and
-keep the original `container.json`. On Linux, use the
+If macOS refuses to create xART with `-69624`, the new container builder
+creates an empty volume, assigns the xART role offline, then checks the image
+with `fsck_apfs`. For a previously built container that lacks xART, use the
 [DroidVM APFS tool](https://github.com/Droid-VM/macOS-DroidVM/blob/9db2f6f263173b660536530c2d102f480280cdb3/scripts/apfs-add-volumes.py)
 with its pinned apfsprogs dependency. Run it on a copy of the raw container.
 
@@ -73,17 +119,17 @@ sudo python3 scripts/sheng-apfs/provision-data.py with-xart private-container \
 Use the new receipt to build the matching kernel and payload. Keep the
 provisioned container private because it contains the account credentials.
 
-## Package on Linux
+## Package an existing container
 
-Copy both files to Linux. Use sparse transfer or extraction for
-`container.apfs`, such as `rsync -aS`. Install mkosi 26 or later and Python 3.
-Use the target partition's capacity in bytes.
+Use the target partition's capacity in bytes. For Linux with mkosi, add
+`--use-mkosi` before `--partition-bytes`. Preserve sparse files when
+transferring the container, for example with `rsync -aS`.
 
 ```sh
 scripts/sheng-apfs/pack-rootfs.sh --partition-bytes 249497890816 \
   /path/to/apfs-container /path/to/sheng-package
 cd /path/to/sheng-package
-sha256sum -c SHA256SUMS
+shasum -a 256 -c SHA256SUMS
 ```
 
 The command produces:

@@ -12,6 +12,7 @@ import hashlib
 from pathlib import Path
 import struct
 import sys
+import time
 
 BLOCK = 4096
 MAGIC = 0xED26FF3A
@@ -20,11 +21,25 @@ MAX_RAW_BLOCKS = 4096          # 16 MiB per RAW chunk
 ZERO = bytes(BLOCK)
 
 
+def progress_report(label, total):
+    deadline = time.monotonic() + 10
+
+    def report(done):
+        nonlocal deadline
+        now = time.monotonic()
+        if now >= deadline:
+            print(f'{label} - {done / total:.1%} - {done * BLOCK}/{total * BLOCK} bytes', flush=True)
+            deadline = now + 10
+
+    return report
+
+
 def convert(source, target):
     size = source.stat().st_size
     if size % BLOCK:
         raise SystemExit('Input size must be a multiple of 4096')
     total_blocks = size // BLOCK
+    report = progress_report(f'Encoding {target.name}', total_blocks)
     chunks = 0
     with open(source, 'rb') as src, open(target, 'wb') as out:
         out.write(b'\0' * 28)                      # header, rewritten at the end
@@ -69,6 +84,7 @@ def convert(source, target):
                     if pending_blocks == MAX_RAW_BLOCKS:
                         flush_raw()
             remaining -= take
+            report(total_blocks - remaining)
         flush_raw()
         flush_zero()
         out.seek(0)
@@ -78,6 +94,7 @@ def convert(source, target):
 
 def expand_hash(path, expect_blocks):
     digest = hashlib.sha256()
+    report = progress_report(f'Verifying {path.name}', expect_blocks)
     with open(path, 'rb') as handle:
         magic, major, minor, fhs, chs, blk, total, chunks, _ = struct.unpack('<IHHHHIIII', handle.read(28))
         if magic != MAGIC or (fhs, chs, blk) != (28, 12, BLOCK) or total != expect_blocks:
@@ -91,6 +108,8 @@ def expand_hash(path, expect_blocks):
                     raise SystemExit('Bad RAW chunk size')
                 while left:
                     data = handle.read(min(left, 8 << 20))
+                    if not data:
+                        raise ValueError('Truncated RAW chunk')
                     digest.update(data)
                     left -= len(data)
             elif kind == FILL:
@@ -106,6 +125,7 @@ def expand_hash(path, expect_blocks):
             else:
                 raise SystemExit(f'Unexpected chunk type {kind:#x}')
             seen += count
+            report(seen)
         if seen != total:
             raise SystemExit('Chunk blocks do not add up')
     return digest.hexdigest()

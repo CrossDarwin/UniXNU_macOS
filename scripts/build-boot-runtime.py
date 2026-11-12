@@ -247,15 +247,18 @@ def main():
     request = json.loads(parser.parse_args().request.read_text())
     status('preparing ' + request.get('target', 'selected target'))
     out = Path(request['output'])
-    seed = Path(request['data_ramdisk'])
+    seed = None if request.get('native_apfs') else Path(request['data_ramdisk'])
+    if seed is None and (request.get('data_ramdisk') or request.get('init_data') or request.get('boot_shims')):
+        raise SystemExit('Native APFS runtime cannot use a legacy Data seed or boot shims')
     addon = Path(request['gpu_addon']) if request.get('gpu_addon') else None
     trust = Path(request['trust_cache']) if request.get('trust_cache') else None
     want_addon = request.get('gpu_addon_enabled', True)
     with tempfile.TemporaryDirectory(prefix='prepare-', dir=out) as td:
         work = Path(td)
-        if not seed.is_file() or (addon is None and want_addon):
+        missing_seed = seed is not None and not seed.is_file()
+        if missing_seed or (addon is None and want_addon):
             with os_mount(request['os_image'], work) as mount:
-                if not seed.is_file():
+                if missing_seed:
                     if not request['init_data']:
                         raise SystemExit('refuse to generate Data without --init-data')
                     script('make-data-seed.py', mount, seed, '--gib', str(request['data_gib']),
@@ -486,7 +489,8 @@ def main():
                 original.replace(candidate)
             trust = out / 'owner-trust.bundle'
             candidate.replace(trust)
-        (out / 'generated.json').write_text(json.dumps(dict(data_ramdisk=str(seed), gpu_addon=str(addon) if addon else None,
+        (out / 'generated.json').write_text(json.dumps(dict(data_ramdisk=str(seed) if seed else None,
+                                                          gpu_addon=str(addon) if addon else None,
                                                           trust_cache=str(trust)), indent=2) + '\n')
 
 
