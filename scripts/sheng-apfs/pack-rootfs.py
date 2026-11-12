@@ -23,6 +23,12 @@ def pack(input_dir, output, partition_bytes, raw_only, link_raw, tools, *, nativ
     manifest = json.loads((input_dir / 'container.json').read_text())
     if manifest['format'] != 'sheng-apfs-v1':
         raise ValueError('Unexpected container manifest format')
+    if native and sys.platform == 'darwin' and not manifest.get('fixture', False):
+        spec = importlib.util.spec_from_file_location('container', Path(__file__).with_name('make-container.py'))
+        container = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(container)
+        with container.attached(input_dir / 'container.apfs', readonly=True) as devices:
+            container.require_runtime_space(container.container_for(devices))
     raw = output / 'rootfs.img'
     with (input_dir / 'container.apfs').open('rb') as handle:
         info = os.fstat(handle.fileno())

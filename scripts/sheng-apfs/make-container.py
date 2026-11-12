@@ -237,6 +237,70 @@ def checked_container(disk):
                'system_uuid': volumes['System']['uuid'], 'volumes': volumes}
 
 
+
+def require_runtime_space(info):
+    capacity = int(info['CapacityCeiling'])
+    available = int(info['CapacityFree'])
+    if not 0 <= available <= capacity:
+        raise ValueError('Invalid APFS capacity report')
+    required = 8 * 2**30
+    print(f'APFS runtime space - {available / 2**30:.2f} GiB free'
+          f' - {required / 2**30:.0f} GiB required', flush=True)
+    if available < required:
+        raise ValueError('Insufficient APFS free space for first boot and swap;'
+                         ' grow the container before packaging')
+
+
+def grow_container(args, output):
+    baseline = args.grow_container.resolve()
+    before = json.loads((baseline / 'container.json').read_text())
+    source = baseline / 'container.apfs'
+    size = args.size_gib * 2**30
+    if before['format'] != 'sheng-apfs-v1' or source.stat().st_size != before['bytes']:
+        raise ValueError('Baseline image and receipt do not agree')
+    if size <= before['bytes']:
+        raise ValueError('The new container must be larger than the baseline')
+    stage = output.with_name('.' + output.name + '.incomplete')
+    with output.with_name('.' + output.name + '.lock').open('a') as guard:
+        fcntl.flock(guard, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        stage.mkdir(mode=0o700, exist_ok=True)
+        inputs = {'baseline': str(baseline), 'receipt': before, 'bytes': size}
+        checkpoint = stage / 'grow-inputs.json'
+        if checkpoint.exists() and json.loads(checkpoint.read_text()) != inputs:
+            raise ValueError(f'Growth inputs changed: {stage}')
+        checkpoint.write_text(json.dumps(inputs, indent=2) + '\n')
+        disk = stage / 'container.apfs'
+        if not disk.exists():
+            run('/bin/cp', '-c', source, disk)
+            disk.chmod(0o600)
+        if disk.stat().st_size not in (before['bytes'], size):
+            raise ValueError('Incomplete image has an unexpected size')
+        with disk.open('r+b') as handle:
+            handle.truncate(size)
+        with attached(disk) as devices:
+            info = container_for(devices)
+            if int(info['CapacityCeiling']) != size:
+                run('diskutil', 'apfs', 'resizeContainer', info['ContainerReference'], '0')
+            info = container_for(devices)
+            if not before['fixture']:
+                require_runtime_space(info)
+        with checked_container(disk) as layout:
+            for key in ('container_uuid', 'volume_group_uuid', 'system_uuid', 'volumes'):
+                if layout[key] != before[key]:
+                    raise ValueError(f'Container growth changed {key}')
+            if layout['bytes'] != size:
+                raise ValueError('Container did not grow to the requested size')
+            digest = image_hash(disk)
+        (stage / 'container.json').write_text(json.dumps(
+            {**before, **layout, 'sha256': digest}, indent=2) + '\n')
+        checkpoint.unlink()
+        if os.environ.get('SUDO_UID') and os.environ.get('SUDO_GID'):
+            for path in (disk, stage / 'container.json', stage):
+                os.chown(path, int(os.environ['SUDO_UID']), int(os.environ['SUDO_GID']))
+        stage.rename(output)
+    print(f'Container grown - {output}', flush=True)
+
+
 def image_hash(disk):
     size = disk.stat().st_size
     print(f'Hashing {disk.name} - {size / 2**30:.2f} GiB', flush=True)
@@ -382,6 +446,7 @@ def make_container(args, output):
                 container = container_for(devices)['ContainerReference']
                 system, data, preboot = (volume(container, name=name) for name in ('System', 'Data', 'Preboot'))
                 populate(args, system, data, preboot, stage)
+                require_runtime_space(container_for(devices))
 
         with checked_container(disk) as layout:
             if not args.without_xart and layout['volumes'].get('xART', {}).get('roles') != ['xART']:
@@ -404,6 +469,8 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('output', type=Path, help='Container directory')
     parser.add_argument('--size-gib', type=int)
+    parser.add_argument('--grow-container', metavar='BASELINE_DIRECTORY', type=Path,
+                        help='Clone and grow a container while preserving its volumes and Data')
     parser.add_argument('--verify-xart', metavar='BASELINE_JSON', type=Path,
                         help='Verify an offline xART addition and write a new container.json')
     parser.add_argument('--repair-metadata', metavar='BASELINE_DIRECTORY', type=Path,
@@ -421,12 +488,24 @@ def main():
         parser.error('APFS volume creation needs macOS')
     output = args.output.absolute()
     if args.verify_xart:
-        if args.size_gib is not None or args.fixture or args.without_xart or any(images) or args.repair_metadata:
+        if (args.size_gib is not None or args.fixture or args.without_xart or any(images)
+                or args.repair_metadata or args.grow_container):
             parser.error('--verify-xart requires only the baseline and modified container directory')
         try:
             verify_xart(args.verify_xart, output)
         except (OSError, ValueError, KeyError, subprocess.CalledProcessError) as error:
             sys.exit(f'xART verification failed: {error}')
+        return
+    if args.grow_container:
+        if (args.size_gib is None or args.size_gib <= 0 or args.fixture or any(images)
+                or args.repair_metadata or args.without_xart):
+            parser.error('--grow-container requires a baseline, --size-gib and a new output directory')
+        if output.exists() or output.is_symlink() or not output.parent.is_dir():
+            parser.error('Use a new output directory under an existing parent')
+        try:
+            grow_container(args, output)
+        except (OSError, ValueError, KeyError, subprocess.CalledProcessError) as error:
+            sys.exit(f'APFS growth failed: {error}')
         return
     if args.repair_metadata and (args.fixture or args.size_gib is not None or args.without_xart):
         parser.error('--repair-metadata requires the baseline, three source images and a new output directory')

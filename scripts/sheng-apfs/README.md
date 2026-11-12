@@ -66,7 +66,7 @@ The build VM must allow unrestricted filesystem access so root can preserve BSD
 restricted flags and rootless attributes. The command tests this before copying.
 
 ```sh
-sudo python3 scripts/sheng-apfs/make-container.py --size-gib 32 \
+sudo python3 scripts/sheng-apfs/make-container.py --size-gib 64 \
   --rsync /path/to/rsync \
   --system /path/to/OS.dmg --system-os /path/to/SystemOS.dmg \
   --app-os /path/to/AppOS.dmg /path/to/apfs-container
@@ -88,6 +88,23 @@ sudo python3 scripts/sheng-apfs/make-container.py \
   --system /path/to/OS.dmg --system-os /path/to/SystemOS.dmg \
   --app-os /path/to/AppOS.dmg /path/to/repaired-container
 ```
+
+## Grow an existing container
+
+A populated image needs at least 8 GiB of free APFS space for first boot and
+swap. New builds use 64 GiB. To keep an existing image's accounts, files and
+volume UUIDs, grow an APFS clone on the macOS build host:
+
+```sh
+python3 scripts/sheng-apfs/make-container.py \
+  --grow-container /path/to/current-container --size-gib 64 \
+  /path/to/larger-container
+```
+
+The command checks the filesystem and volume identities and writes a new
+receipt. Rebuild the boot package with that receipt, then package the larger
+container. Installing an older local image replaces changes made on the device;
+use a current device backup when those changes must be kept.
 
 ## Add xART to an existing container
 
