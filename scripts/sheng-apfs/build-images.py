@@ -7,6 +7,7 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import re
 import shutil
 import struct
 import subprocess
@@ -27,6 +28,23 @@ BOOT_LIMIT = 192 * 2**20
 RESTORE_IMAGES = (('system', 'OS', 'os_volume_uuid'),
                   ('system-os', 'Cryptex1,SystemOS', 'systemos_volume_uuid'),
                   ('app-os', 'Cryptex1,AppOS', 'app_volume_uuid'))
+
+
+def account_defaults(args, path=ROOT / '.local/apfs-account.json'):
+    defaults = json.loads(path.read_text()) if path.is_file() else {}
+    if (not isinstance(defaults, dict) or set(defaults) - {'user', 'display_name', 'auto_login'}
+            or (defaults and (not isinstance(defaults.get('user'), str)
+                             or not re.fullmatch(r'[a-z][a-z0-9_-]{0,30}', defaults['user'])
+                             or not isinstance(defaults.get('display_name'), str)
+                             or not defaults['display_name'].strip()
+                             or type(defaults.get('auto_login')) is not bool))):
+        raise ValueError(f'Invalid local APFS account defaults: {path}')
+    selected = args.user is None or args.user == defaults.get('user')
+    args.user = args.user or defaults.get('user')
+    if args.display_name is None and selected:
+        args.display_name = defaults.get('display_name')
+    if args.auto_login is None:
+        args.auto_login = defaults.get('auto_login', False) if selected else False
 
 
 def step(label):
@@ -238,10 +256,12 @@ def main():
     parser.add_argument('--boot-template', type=Path, help='reuse the verified sheng transport from a boot.img and boot.json directory')
     parser.add_argument('--user', help='provision a local administrator and skip Setup Assistant')
     parser.add_argument('--display-name', help='display name of the local administrator')
-    parser.add_argument('--auto-login', action='store_true', help='automatically log in to the provisioned account')
+    parser.add_argument('--auto-login', action=argparse.BooleanOptionalAction, default=None,
+                        help='automatically log in to the provisioned account')
     parser.add_argument('--raw-only', action='store_true', help='omit the Android sparse image')
     parser.add_argument('work', type=Path, help='private workspace for the images and build state')
     args = parser.parse_args()
+    account_defaults(args)
     if args.use_mkosi and not sys.platform.startswith('linux'):
         parser.error('--use-mkosi runs the packaging step on Linux')
     if not (args.pack_only or args.use_mkosi) and sys.platform != 'darwin':

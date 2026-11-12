@@ -26,6 +26,17 @@ Use `--user rinnrei --display-name RinnRei --auto-login` to provision a local
 administrator and skip Setup Assistant. Enter the account password at the
 prompt. Keep that workspace private.
 
+For later builds, save account defaults in `.local/apfs-account.json` in the
+UniXNU checkout:
+
+```json
+{"user": "rinnrei", "display_name": "RinnRei", "auto_login": true}
+```
+
+The file is ignored by Git. Passwords are entered at provisioning time.
+Explicit account options override the saved defaults. Use `--no-auto-login`
+to disable automatic login for a build.
+
 The workspace contains `boot/boot.img`, `boot/payload.img`, `rootfs/rootfs.img`,
 and `rootfs/rootfs.fastboot.img`. Verify the package from the workspace with
 `shasum -a 256 -c SHA256SUMS`. Installing the root filesystem replaces
