@@ -35,6 +35,13 @@ Use `--boot-template DIR` to reuse a verified sheng transport. The directory
 must contain the version 0 `boot.img` and its `boot.json`. Use
 `--runtime-dir DIR` to reuse an existing matched GPU addon and trust bundle.
 
+Use `--prepare-only --container DIR` to rebuild the boot images against an
+existing container. Repeated `--kernel-arg=NAME=VALUE` options add boot
+arguments. With `boot-ui-trace=1`, macOS captures WindowServer, Dock, Finder
+and loginwindow. `boot-callout-trace=1` records callback CPU totals and active
+callbacks in the persistent log. `CALL kind=0` identifies a thread call;
+`kind=1` identifies its timer action. Their CPU totals overlap.
+
 If packaging fails after the boot build, retry the last step:
 
 ```sh

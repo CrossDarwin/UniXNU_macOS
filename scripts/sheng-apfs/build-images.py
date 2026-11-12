@@ -158,6 +158,8 @@ def build_boot(args, ctx, common, container, runtime, work):
 
 def prepare(args, work, container):
     common = ['--os', 'macos-27']
+    for argument in args.kernel_arg or []:
+        common += [f'--kernel-arg={argument}']
     for name in ('device', 'uefi', 'ipsw'):
         value = getattr(args, name)
         if value:
@@ -236,6 +238,7 @@ def main():
     parser.add_argument('--rsync', help='rsync 3 executable for creating the container')
     parser.add_argument('--runtime-dir', type=Path, help='reuse a complete runtime report and its matched addon/trust bundle')
     parser.add_argument('--boot-template', type=Path, help='reuse the verified sheng transport from a boot.img and boot.json directory')
+    parser.add_argument('--kernel-arg', action='append', help='extra kernel boot argument (repeatable)')
     parser.add_argument('--user', help='provision a local administrator and skip Setup Assistant')
     parser.add_argument('--display-name', help='display name of the local administrator')
     parser.add_argument('--auto-login', action='store_true', help='automatically log in to the provisioned account')
