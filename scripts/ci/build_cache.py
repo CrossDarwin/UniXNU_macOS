@@ -13,6 +13,7 @@ WORK = Path('UniXNU/out/sheng/macos-27.3-26C5035r/sheng_macos/tree')
 SOURCE_PATHS = [Path('UniXNU/out/feeds'), Path('device/.cache/firmware')]
 SOURCE_PATHS += [Path('device/firmware/wcn7850') / name for name in ('amss.bin', 'm3.bin', 'board-2.bin', 'Notice.txt')]
 SOURCE_PATHS += [Path('device/drivers/Ath12kWifi/deps')]
+SOURCE_PATHS += [Path('device/drivers/QcomIris/deps')]
 SOURCE_PATHS += [Path('device/drivers/QcaBluetooth/out/linux')]
 SOURCE_PATHS += [WORK / '.cache' / name for name in ('mesa-work', 'gpu-reference', 'mesa-venv', 'mesa-tools',
                                                   'github-sources', 'sources', 'adreno-source', 'softfloat-source',

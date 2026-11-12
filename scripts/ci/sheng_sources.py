@@ -7,16 +7,16 @@ from pathlib import Path
 import subprocess
 import tomllib
 
-SOC_REVISION = '97665e28578483082b674e8375a8fa65f4cf49cf'
-USB_REVISION = 'e4efe95c903a737e0f5955e5b50a8fb4d2a7d718'
+SOC_REVISION = '2dc650ca76ae38715cd0712e60a44b14fe251745'
+USB_REVISION = '0dd83827279ee070dca7ddb486c90365567cc99d'
 SOC_INPUTS = ('Sm8550GeniUart.h', 'Sm8550GeniUart.c', 'Sm8550Gcc.c',
-              'Sm8550QupDma.h', 'Sm8550QupDma.c')
+              'Sm8550QupDma.h', 'Sm8550QupDma.c', 'Sm8550VideoCc.h',
+              'Sm8550VideoCc.c', 'Sm8550AppsSmmu.h', 'Sm8550AppsSmmu.c')
 USB_INPUTS = ('QcomDwc3.cpp', 'QcomEusb2Phy.h', 'QcomQmpUsb3.h', 'QcomUcsi.h')
 
 
 def configure(device: Path) -> None:
-    # The device's recorded SoC predates its UART consumer. Keep the override
-    # separate from tracked upstream configuration and include it in cache keys.
+    # The upstream board pin predates the shared video clock and SMMU support.
     text = ('[[source]]\nkind = "soc"\nname = "sm8550"\n'
             'git = "https://github.com/UniXNU/UniXNU-sm8550-common.git"\n'
             f'commit = "{SOC_REVISION}"\n')
@@ -24,8 +24,7 @@ def configure(device: Path) -> None:
     if path.exists() and path.read_text() != text:
         raise ValueError(f'Refuse to replace existing source overrides: {path}')
     path.write_text(text)
-    # The display archive compiles USB even though it is not a selected component.
-    # The workflow checks out the published pin instead of the unavailable gitlink.
+    # The display archive uses the USB source from the workflow checkout.
     subprocess.run(['git', '-C', str(device), 'config', 'submodule.drivers/QcomDwc3.update', 'none'], check=True)
     print(f'SM8550 source: {SOC_REVISION}', flush=True)
     print(f'USB source: {USB_REVISION} (explicit workflow checkout)', flush=True)

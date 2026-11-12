@@ -47,14 +47,14 @@ jobs:
       - uses: actions/checkout@v4
         with:
           repository: UniXNU/UniXNU-sheng
-          ref: 89a9686ee45cf66ad6f873d6d6180bda966892c1
+          ref: e8937177309d88c93b305a57bad147fd5fac8a86
           path: device
       - name: Select device dependencies
         run: python3 scripts/ci/sheng_sources.py --device ../device
       - uses: actions/checkout@v4
         with:
           repository: UniXNU/QcomDwc3
-          ref: e4efe95c903a737e0f5955e5b50a8fb4d2a7d718
+          ref: 0dd83827279ee070dca7ddb486c90365567cc99d
           path: device/drivers/QcomDwc3
       - uses: actions/checkout@v4
         with:
@@ -141,6 +141,13 @@ jobs:
 
       - name: Prepare verified Wi-Fi firmware
         run: python3 scripts/ci/wifi_firmware.py --device ../device
+
+      - name: Prepare verified video inputs
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          python3 ../device/scripts/extract-files.py --section Video
+          python3 ../device/drivers/QcomIris/tools/fetch-sources.py
 
       - name: Fetch and verify Wi-Fi source dependencies
         env:
@@ -278,7 +285,7 @@ jobs:
           {
             echo "sheng macOS test package: $RESULT"
             echo "Profile: $PROFILE"
-            echo 'Device: 89a9686ee45cf66ad6f873d6d6180bda966892c1'
+            echo "Device: $(git -C ../device rev-parse HEAD)"
             echo 'UEFI: 66421cb7bb5694843aec8de1ca3d1de4c20cca38'
             echo 'Hardware validation: pending; this workflow never flashes a device.'
             echo 'Download the seed and test package within one day.'
