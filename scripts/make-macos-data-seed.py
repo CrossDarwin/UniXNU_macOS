@@ -182,7 +182,7 @@ def write_root(path, data, mode):
     path.chmod(mode)
 
 
-def add_user(dslocal, name, password, uid=501):
+def add_user(dslocal, name, password, uid=501, *, display_name=None):
     """A local administrator as System Settings writes one: the user record and its admin and staff memberships."""
     salt, iterations = os.urandom(32), 50000
     entropy = hashlib.pbkdf2_hmac('sha512', password.encode(), salt, iterations, 128)
@@ -190,7 +190,7 @@ def add_user(dslocal, name, password, uid=501):
                             fmt=plistlib.FMT_BINARY)
     guid = str(uuid.uuid4()).upper()
     write_root(dslocal / 'users' / (name + '.plist'), plistlib.dumps({
-        'name': [name], 'realname': [name], 'uid': [str(uid)], 'gid': ['20'], 'home': ['/Users/' + name], 'shell': ['/bin/zsh'],
+        'name': [name], 'realname': [display_name or name], 'uid': [str(uid)], 'gid': ['20'], 'home': ['/Users/' + name], 'shell': ['/bin/zsh'],
         'generateduid': [guid], 'passwd': ['********'], 'authentication_authority': [';ShadowHash;HASHLIST:<SALTED-SHA512-PBKDF2>'],
         'ShadowHashData': [shadow], '_writers_passwd': [name], '_writers_realname': [name], '_writers_hint': [name]},
         fmt=plistlib.FMT_BINARY), 0o600)

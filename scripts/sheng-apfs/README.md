@@ -59,6 +59,20 @@ python3 scripts/sheng-apfs/make-container.py \
   --verify-xart apfs-container/container.json with-xart
 ```
 
+## Provision a local account
+
+On the macOS build host, clone the populated container and create the first
+administrator. The tool prompts for the password and marks Setup Assistant
+complete. Use `--auto-login` for an unattended test device.
+
+```sh
+sudo python3 scripts/sheng-apfs/provision-data.py with-xart private-container \
+  --user localadmin --display-name 'Local Admin' --auto-login
+```
+
+Use the new receipt to build the matching kernel and payload. Keep the
+provisioned container private because it contains the account credentials.
+
 ## Package on Linux
 
 Copy both files to Linux. Use sparse transfer or extraction for
@@ -94,12 +108,15 @@ The writable backend uses ShengUfs revision
 
 ```sh
 export UNIXNU_APFS_CONTAINER=/path/to/with-xart/container.json
-./unixnu build kernel payload --os macos-27 --device ../device --uefi ../uefi-sheng
+./unixnu build kernel payload --os macos-27 --device ../device --uefi ../uefi-sheng \
+  --runtime-dir /path/to/prepared-runtime
 ./unixnu bootimg --os macos-27 --device ../device --uefi ../uefi-sheng
 ```
 
 The kernel binds the container size and UUID. The payload binds the System and
 Data volume UUIDs. System mounts read-only, with the dyld cache in that volume.
+The prepared runtime directory supplies the final addon and its matching trust
+bundle through `generated.json`.
 The APFS backend provides writable Data and reserves the end of `userdata`
 for diagnostics. This development image has no System volume seal or per-block
 signature verification. This profile also accepts older development images whose
