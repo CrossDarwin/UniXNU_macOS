@@ -170,3 +170,5 @@ arm64e 采样器先去除返回地址的 PAC，再检查和编码地址；栈区
 自动脚本沿用手动循环的顺序。支持 recovery 访问的板型使用相同结构并替换为 ADB 命令。
 
 **结果：** 每次测试都有可识别的证据目录和返回路径。继续完成其余[启动验证阶段](/zh/porting/bring-up)。
+
+BCM2837 构建配置按可用内存计算 vnode 缓存，并使用标准 medium 上限。此前 1024 个 vnode 的上限导致 QEMU 启动 macOS 时反复出现 `vnode: table is full`。

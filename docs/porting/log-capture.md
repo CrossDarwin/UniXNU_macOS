@@ -230,3 +230,5 @@ access can use the same runner structure with ADB commands.
 
 **Result:** each test produces an identifiable evidence directory and a recorded
 return path. Continue the remaining [bring-up stages](/porting/bring-up).
+
+The BCM2837 build configuration sizes the vnode cache from usable memory with the standard medium cap. A 1024-vnode cap caused repeated `vnode: table is full` messages during the QEMU macOS boot test.

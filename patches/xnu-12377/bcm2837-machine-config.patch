@@ -123,7 +123,7 @@ index 00000000..b1674966
 +options     TRASH_VFP_ON_SAVE   # <debug,trash_vfp>
 +options		ALTERNATE_DEBUGGER	# <alternate_debugger>
 +
-+options   CONFIG_VNODES=1024		# <xsmall>
++options   CONFIG_VNODES=263168		# <xsmall>
 +
 +options   CONFIG_FREEZE_SUSPENDED_MIN=4		# <xsmall>
 +
