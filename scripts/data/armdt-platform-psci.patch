@@ -1,0 +1,105 @@
+diff --git a/ArmDTPlatform.cpp b/ArmDTPlatform.cpp
+index 317ce20..d67108e 100644
+--- a/ArmDTPlatform.cpp
++++ b/ArmDTPlatform.cpp
+@@ -28,6 +28,9 @@ volatile uint32_t armdt_platform_bus_count = 0;
+ volatile uint32_t armdt_platform_defaults_count = 0;
+ volatile uint32_t armdt_platform_nvram_proxy = 0;
+ volatile uint32_t armdt_platform_device_count = 0;
++volatile uint32_t armdt_platform_power_type = 0;
++volatile int64_t armdt_platform_power_result = -1;
++volatile uint32_t armdt_platform_power_conduit = 0;
+ }
+ 
+ class ArmDTPlatform : public IODTPlatformExpert {
+@@ -38,6 +41,7 @@ public:
+   const char *excludeList (void) override;
+   long getGMTTimeOfDay (void) override;
+   void setGMTTimeOfDay (long secs) override;
++  int haltRestart (unsigned int type) override;
+ private:
+   bool hasNVRAMProxy (IOService *provider);
+   bool createDeviceNubs (IOService *provider);
+@@ -200,19 +204,65 @@ bool ArmDTPlatform::createDeviceNubs (IOService *provider)
+   return true;
+ }
+ 
+-static void platformStageReset (void)
++static int64_t platformPowerCall (uint64_t function)
+ {
+-  // PSCI SYSTEM_RESET via the same SMC conduit as the entry reset probe.
+-  register uint64_t x0 __asm__ ("x0") = 0x84000009;
++  const uint32_t conduit = armdt_platform_power_conduit;
++  if (!conduit) return -1;
++  register uint64_t x0 __asm__ ("x0") = function;
+   register uint64_t x1 __asm__ ("x1") = 0;
+   register uint64_t x2 __asm__ ("x2") = 0;
+   register uint64_t x3 __asm__ ("x3") = 0;
+-  __asm__ volatile ("smc #0" : "+r" (x0) : "r" (x1), "r" (x2), "r" (x3) : "memory");
++  if (conduit == 2) {
++    __asm__ volatile ("hvc #0" : "+r" (x0), "+r" (x1), "+r" (x2), "+r" (x3)
++                      :: "memory", "x4", "x5", "x6", "x7", "x8", "x9", "x10",
++                         "x11", "x12", "x13", "x14", "x15", "x16", "x17");
++  } else {
++    __asm__ volatile ("smc #0" : "+r" (x0), "+r" (x1), "+r" (x2), "+r" (x3)
++                      :: "memory", "x4", "x5", "x6", "x7", "x8", "x9", "x10",
++                         "x11", "x12", "x13", "x14", "x15", "x16", "x17");
++  }
++  return (int64_t) x0;
++}
++
++int ArmDTPlatform::haltRestart (unsigned int type)
++{
++  uint64_t function;
++  switch (type) {
++  case kPERestartCPU:
++    function = 0x84000009; // PSCI SYSTEM_RESET
++    break;
++  case kPEHaltCPU:
++  case kPEUPSDelayHaltCPU:
++    function = 0x84000008; // PSCI SYSTEM_OFF
++    break;
++  default:
++    // Preserve panic synchronization and the deliberate hang path.
++    return IODTPlatformExpert::haltRestart (type);
++  }
++  armdt_platform_power_type = type;
++  armdt_platform_power_result = platformPowerCall (function);
++  // Successful power transitions never return. Retain firmware refusal for diagnosis.
++  return -1;
++}
++
++static void platformStageReset (void)
++{
++  (void) platformPowerCall (0x84000009);
+   for (;;) { __asm__ volatile ("wfe"); }
+ }
+ 
+ bool ArmDTPlatform::configure (IOService *provider)
+ {
++  // Resolve the conduit before shutdown, while registry objects can still be acquired.
++  IORegistryEntry *psci = provider->childFromPath ("psci", gIODTPlane);
++  if (psci != nullptr) {
++    OSData *method = OSDynamicCast (OSData, psci->getProperty ("method"));
++    if (method != nullptr && method->getLength () == 4) {
++      if (memcmp (method->getBytesNoCopy (), "smc", 4) == 0) armdt_platform_power_conduit = 1;
++      else if (memcmp (method->getBytesNoCopy (), "hvc", 4) == 0) armdt_platform_power_conduit = 2;
++    }
++    psci->release ();
++  }
+   IORegistryEntry *cpus = provider->childFromPath ("cpus", gIODTPlane);
+   IORegistryEntry *bus = provider->childFromPath ("arm-io", gIODTPlane);
+   IORegistryEntry *defaults = provider->childFromPath ("defaults", gIODTPlane);
+@@ -304,6 +354,12 @@ bool ArmDTPlatform::configure (IOService *provider)
+     platformStageReset ();
+   }
+   registerService ();
++  unsigned powerTest = 0;
++  PE_parse_boot_argn ("platform-power-test", &powerTest, sizeof (powerTest));
++  if (powerTest == 1 || powerTest == 2) {
++    haltRestart (powerTest == 1 ? kPERestartCPU : kPEHaltCPU);
++    panic ("ArmDTPlatform: power test returned %lld", armdt_platform_power_result);
++  }
+   if (platformStage == 5) {
+     platformStageReset ();
+   }
