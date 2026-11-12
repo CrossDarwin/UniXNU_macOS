@@ -6,6 +6,7 @@ import hashlib
 import importlib.util
 import json
 import os
+import shutil
 import stat
 import subprocess
 import sys
@@ -34,6 +35,19 @@ def pack(input_dir, output, partition_bytes, raw_only, link_raw, tools, *, nativ
             raise ValueError('APFS container UUID disagrees with the manifest')
         if partition_bytes <= 0 or partition_bytes % 4096 or size > partition_bytes - 2**30:
             raise ValueError('Container and 1 GiB diagnostic reserve do not fit the target partition')
+        required = 0
+        if not raw_only:
+            required += size + (size // 4096) * 12 + 28
+        if not link_raw and not (native and sys.platform == 'darwin'):
+            required += size
+        if required:
+            required += 256 * 2**20
+            free = shutil.disk_usage(output).free
+            print(f'Packaging space - available {free / 2**30:.2f} GiB'
+                  f' - required up to {required / 2**30:.2f} GiB', flush=True)
+            if free < required:
+                raise ValueError('Insufficient packaging space; preserve the container and boot images,'
+                                 ' free space and resume with build-images.py --pack-only WORK')
         if link_raw:
             print(f'Verifying linked raw container - {size / 2**30:.2f} GiB', flush=True)
             digest = hash_image(handle, size, f'Verifying {raw.name}')
