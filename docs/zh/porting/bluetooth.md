@@ -139,3 +139,5 @@ fastboot boot boot.img
 ## 下一步
 
 继续 [USB](/zh/porting/usb)。
+
+使用锁定版本的 macOS 27.3 守护进程时，运行 `python3 tools/test-type0.py --os macos27 /path/to/bluetoothd.arm64e`，按其 ABI 和 HCI 描述符检查能力发布。控制器模型测试不代表实机搜索和配对已通过。

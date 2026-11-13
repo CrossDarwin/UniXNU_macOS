@@ -145,3 +145,5 @@ Record device results as described in [Porting record](/porting/records).
 ## Next step
 
 Continue with [USB](/porting/usb).
+
+For the locked macOS 27.3 daemon, `python3 tools/test-type0.py --os macos27 /path/to/bluetoothd.arm64e` checks capability publication against its own ABI and HCI descriptors. This controller-model test does not verify radio discovery or pairing.
