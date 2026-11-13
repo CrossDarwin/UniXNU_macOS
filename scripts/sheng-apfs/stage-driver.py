@@ -26,7 +26,8 @@ def write_config(destination, receipt):
               f'#define UNIXNU_APFS_MARKER "{marker(fingerprint)}"\n'
               f'#define UNIXNU_APFS_BYTES {metadata["bytes"]}ULL\n'
               f'#define UNIXNU_APFS_SYSTEM_UUID "{metadata["system_uuid"].upper()}"\n'
-              f'#define UNIXNU_APFS_DATA_UUID "{volumes["Data"]["uuid"].upper()}"\n')
+              f'#define UNIXNU_APFS_DATA_UUID "{volumes["Data"]["uuid"].upper()}"\n'
+              f'#define UNIXNU_APFS_VM_UUID "{volumes["VM"]["uuid"].upper()}"\n')
     for name, value in (('kNativeApfsContainerUUID', container), ('kNativeApfsImageIdentity', identity)):
         header += f'static const unsigned char {name}[{len(value)}] = {{' + ','.join(map(str, value)) + '};\n'
     (destination / 'NativeApfsConfig.h').write_text(header)

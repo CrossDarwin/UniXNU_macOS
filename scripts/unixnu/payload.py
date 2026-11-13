@@ -130,6 +130,7 @@ def build(ctx, kernel=None):
         platform = ctx.board.get('adt', {})
         chosen = platform.get('chosen', {})
         identities = {'apfs-system': receipt['system_uuid'], 'apfs-data': receipt['volumes']['Data']['uuid'],
+                      'apfs-vm': receipt['volumes']['VM']['uuid'],
                       'boot-uuid': receipt['system_uuid'], 'apfs-preboot-uuid': receipt['system_uuid']}
         board = {**ctx.board, 'payload': spec, 'adt': {**platform, 'chosen': {
             **chosen, 'string': {**chosen.get('string', {}), **identities}}}}

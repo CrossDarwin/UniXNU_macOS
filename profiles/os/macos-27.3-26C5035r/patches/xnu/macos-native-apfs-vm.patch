@@ -1,0 +1,73 @@
+Mount the bound native APFS VM role volume before launchd starts.
+
+--- a/bsd/kern/kern_exec.c
++++ b/bsd/kern/kern_exec.c
+@@ -9964,6 +9964,56 @@
+ 	printf("owner Data: GPU addon memory release %d\n", native_gpu_addon_released);
+ }
+ 
++/* Bind swap to the receipt's VM volume before launchd can start the pager. */
++static int
++native_apfs_macos_vm_volume(proc_t p, user_addr_t scratch)
++{
++	static const char point[] = "/System/Volumes/VM";
++	char uuid[37] = {0}, device_path[64] = {0};
++	dev_t selected = NODEV;
++	vnode_t root = NULLVP, device = NULLVP;
++	vfs_context_t ctx = vfs_context_current();
++	int error = ENOENT;
++	if (!native_apfs_volume_uuid("apfs-vm", uuid) ||
++	    !native_verified_block_volume_device(uuid, &selected, device_path, sizeof(device_path))) goto done;
++	error = vnode_lookup(point, 0, &root, ctx);
++	if (error) goto done;
++	/* An existing mount must name this VM volume, including on a repeated call. */
++	if (vnode_isvroot(root)) goto verify;
++	vnode_put(root);
++	root = NULLVP;
++	uint8_t payload[0x150] = {0};
++	user64_addr_t spec = scratch + 0x160;
++	uint16_t mode = 1;
++	uint32_t anonymous_owner = 99;
++	memcpy(payload, &spec, sizeof(spec));
++	memcpy(payload + 16, &mode, sizeof(mode));
++	memcpy(payload + 0x144, &anonymous_owner, sizeof(anonymous_owner));
++	memcpy(payload + 0x148, &anonymous_owner, sizeof(anonymous_owner));
++	struct mount_args request = {.type = scratch + 0x100, .path = scratch + 0x120,
++	    .flags = 0, .data = scratch + 0x200};
++	int32_t result = 0;
++	if ((error = copyout("apfs", request.type, 5)) ||
++	    (error = copyout(point, request.path, sizeof(point))) ||
++	    (error = copyout(device_path, spec, strlen(device_path) + 1)) ||
++	    (error = copyout(payload, request.data, sizeof(payload)))) goto done;
++	error = mount(p, &request, &result);
++	if (error) goto done;
++	error = vnode_lookup(point, 0, &root, ctx);
++	if (error) goto done;
++verify:
++	device = vfs_devvp(vnode_mount(root));
++	if (!vnode_isvroot(root) || !device || vnode_specrdev(device) != selected ||
++	    (vfs_flags(vnode_mount(root)) & MNT_RDONLY) ||
++	    strcmp(vfs_statfs(vnode_mount(root))->f_fstypename, "apfs")) error = EAUTH;
++done:
++	if (device) vnode_put(device);
++	if (root) vnode_put(root);
++	native_owner_vm_volume_status = error;
++	printf("Native APFS - VM mount %s at %s: %d\n", device_path, point, error);
++	return error;
++}
++
+ static int
+ native_owner_macos_data_prepare(proc_t p, user_addr_t scratch)
+ {
+@@ -10036,7 +10086,10 @@
+ 		native_owner_rosv_state = 2;
+ 	}
+ 	if (!error && !native_apfs) native_owner_macos_hardware_volume(p, scratch);
+-	if (!error && !native_apfs) native_owner_macos_vm_volume(p, scratch);
++	if (!error) {
++		if (native_apfs) error = native_apfs_macos_vm_volume(p, scratch);
++		else native_owner_macos_vm_volume(p, scratch);
++	}
+ 	if (!error && !native_apfs) native_owner_macos_cryptex_view(p, scratch);
+ #ifdef XNU_OWNER_APP_VOLUME_UUID
+ 	if (!error && !native_apfs) native_owner_macos_app_cryptex(p, scratch);

@@ -68,7 +68,7 @@
  bool NativeUfsBlock::authenticatesVolume (const char *uuid, uint8_t *manifestDigest)
  {
 +  if (nativeContainer) {
-+    if (!uuid || !online || (strcmp(uuid, UNIXNU_APFS_SYSTEM_UUID) && strcmp(uuid, UNIXNU_APFS_DATA_UUID))) return false;
++    if (!uuid || !online || (strcmp(uuid, UNIXNU_APFS_SYSTEM_UUID) && strcmp(uuid, UNIXNU_APFS_DATA_UUID) && strcmp(uuid, UNIXNU_APFS_VM_UUID))) return false;
 +    if (manifestDigest) memcpy(manifestDigest, kNativeApfsImageIdentity, 48);
 +    return true;
 +  }

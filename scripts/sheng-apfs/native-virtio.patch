@@ -35,7 +35,7 @@
  public:
 +  bool nativeApfsIdentity(const char *uuid, uint8_t *digest) const {
 +    if (!nativeApfs || !online || !uuid ||
-+        (strcmp(uuid, UNIXNU_APFS_SYSTEM_UUID) && strcmp(uuid, UNIXNU_APFS_DATA_UUID))) return false;
++        (strcmp(uuid, UNIXNU_APFS_SYSTEM_UUID) && strcmp(uuid, UNIXNU_APFS_DATA_UUID) && strcmp(uuid, UNIXNU_APFS_VM_UUID))) return false;
 +    if (digest) memcpy(digest, kNativeApfsImageIdentity, 48);
 +    return true;
 +  }
@@ -89,7 +89,22 @@
    descriptors[2] = {queuePhysical + 528, 1, 2, 0};
    auto *available = reinterpret_cast<volatile uint16_t *>(queue + 128);
    available[2 + availableIndex % queueSize] = 0;
-@@ -483,7 +505,7 @@
+@@ -470,9 +492,13 @@
+   write32(0x50, 0);
+   auto *used = reinterpret_cast<volatile uint16_t *>(queue + 256);
+   uint64_t deadline;
+-  clock_interval_to_deadline(1000, kMillisecondScale, &deadline);
++  // COW and network-backed test images can stall longer than one second under swap load.
++  const unsigned timeout = nativeApfs ? 30000 : 1000;
++  clock_interval_to_deadline(timeout, kMillisecondScale, &deadline);
+   while (used[1] == usedIndex) {
+     if (mach_absolute_time() >= deadline) {
++      IOLog("NativeVirtioBlock: %s timeout - sector %llu bytes %u used %u expected %u\n",
++            writing ? "write" : "read", sector, bytes, used[1], usedIndex);
+       reset();
+       __atomic_fetch_add(&native_virtio_read_failures, 1, __ATOMIC_RELAXED);
+       return kIOReturnTimeout;
+@@ -483,11 +509,13 @@
    dmaBarrier();
    auto *element = reinterpret_cast<volatile Used *>(queue + 260) + usedIndex % queueSize;
    bool valid = used[1] == static_cast<uint16_t>(usedIndex + 1) && element->id == 0 &&
@@ -98,7 +113,13 @@
    ++usedIndex;
    uint32_t interrupts = read32(0x60) & 3;
    if (interrupts) write32(0x64, interrupts);
-@@ -507,10 +529,20 @@
+   if (!valid) {
++    IOLog("NativeVirtioBlock: invalid completion - status %u id %u length %u used %u expected %u\n",
++          *status, element->id, element->length, used[1], usedIndex);
+     reset();
+     __atomic_fetch_add(&native_virtio_read_failures, 1, __ATOMIC_RELAXED);
+     return kIOReturnIOError;
+@@ -507,10 +535,20 @@
    ownsDevice = true;
    gate = IOLockAlloc();
    if (!gate || !configureQueue()) return false;
@@ -123,7 +144,7 @@
    SHA256_CTX hash;
    SHA256_Init(&hash);
    SHA256_Update(&hash, readBuffer(), 512);
-@@ -531,7 +563,8 @@
+@@ -531,7 +569,8 @@
  {
    if (!buffer || !completion || !completion->action || !count || block >= capacity ||
        count > capacity - block || count > UINT64_MAX / 512 || buffer->getLength() < count * 512) return kIOReturnBadArgument;
@@ -133,7 +154,7 @@
    uint64_t actual = 0;
    IOReturn result = kIOReturnNotReady;
    IOLockLock(gate);
-@@ -542,9 +575,13 @@
+@@ -542,9 +581,13 @@
      constexpr unsigned chunkSize = transferSize;
  #endif
      uint32_t bytes = static_cast<uint32_t>(count * 512 - actual > chunkSize ? chunkSize : count * 512 - actual);
@@ -149,7 +170,7 @@
        result = kIOReturnIOError;
        break;
      }
-@@ -574,3 +611,10 @@
+@@ -574,3 +617,10 @@
    if (gate) { IOLockFree(gate); gate = nullptr; }
    IOBlockStorageDevice::free();
  }

@@ -56,4 +56,5 @@ arch:../../../patches/xnu-12377/darwin26-shared-region.patch
 ../xnu-12377/contig-search-report.patch
 ../xnu-12377/kmem-alloc-failure-report.patch
 macos-native-apfs.patch
+macos-native-apfs-vm.patch
 ../xnu-12377/macos-callout-probe.patch
