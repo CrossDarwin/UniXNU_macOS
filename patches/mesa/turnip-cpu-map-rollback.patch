@@ -1,0 +1,121 @@
+diff --git a/src/freedreno/vulkan/tu_knl_darwin.cc b/src/freedreno/vulkan/tu_knl_darwin.cc
+--- a/src/freedreno/vulkan/tu_knl_darwin.cc
++++ b/src/freedreno/vulkan/tu_knl_darwin.cc
+@@ -1055,36 +1055,104 @@
+ }
+ 
+ static VkResult
+-darwin_bo_map(struct tu_device *dev, struct tu_bo *bo, void *placed_addr)
+-{
++darwin_cpu_map_failure(struct tu_device *dev, struct tu_bo *bo,
++                      uint32_t token, mach_vm_address_t address,
++                      bool mapped, kern_return_t map_error, mach_vm_size_t length)
++{
++   /* Keep every outstanding view and lease with the BO until cleanup succeeds.
++    * Releasing a lease while a short mapping survives permits reuse of live pages. */
++   bo->map = mapped ? (void *)(uintptr_t)address : NULL;
++   bo->darwin_token = token;
++   bo->never_unmap = true;
++   kern_return_t cleanup = KERN_SUCCESS;
++   if (mapped) {
++      cleanup = IOConnectUnmapMemory64(dw.conn, token, mach_task_self(), address);
++      if (cleanup == KERN_SUCCESS)
++         bo->map = NULL;
++   }
++   if (cleanup == KERN_SUCCESS) {
++      NativeAdrenoAbiBoCpuUnmap undo = {.handle = bo->darwin_handle, .token = token, .reserved = 0};
++      cleanup = dw_call(NativeAdrenoMethodBoCpuUnmap, &undo, sizeof(undo), NULL, 0);
++      if (cleanup == KERN_SUCCESS) {
++         bo->darwin_token = 0;
++         bo->never_unmap = false;
++      }
++   }
++   if (cleanup != KERN_SUCCESS) {
++      struct darwin_retire_state *retire = (struct darwin_retire_state *)dev->darwin_retire;
++      pthread_mutex_lock(&retire->lock);
++      retire->failure = vk_device_set_lost(&dev->vk,
++         "CPU map rollback failed: 0x%x; retaining native view and lease", cleanup);
++      VkResult result = retire->failure;
++      pthread_mutex_unlock(&retire->lock);
++      return result;
++   }
++   return vk_errorf(dev, VK_ERROR_MEMORY_MAP_FAILED,
++      "CPU map failed: 0x%x, mapped bytes %llu, required %llu", map_error,
++      (unsigned long long)length, (unsigned long long)bo->size);
++}
++
++static bool
++darwin_cpu_map_resource_failure(kern_return_t error)
++{
++   return error == kIOReturnNoMemory || error == kIOReturnNoResources ||
++          error == kIOReturnNoSpace || error == kIOReturnVMError;
++}
++
++static VkResult
++darwin_bo_map_once(struct tu_device *dev, struct tu_bo *bo, void *placed_addr,
++                   bool *resource_failure)
++{
++   *resource_failure = false;
+    NativeAdrenoAbiBoCpuMap req = {.handle = bo->darwin_handle};
+    NativeAdrenoAbiBoCpuMapReply reply = {};
+    kern_return_t kr = dw_call(NativeAdrenoMethodBoCpuMap, &req, sizeof(req), &reply, sizeof(reply));
+-   if (kr != KERN_SUCCESS)
++   if (kr != KERN_SUCCESS) {
++      *resource_failure = darwin_cpu_map_resource_failure(kr);
+       return vk_errorf(dev, VK_ERROR_MEMORY_MAP_FAILED, "BoCpuMap failed: 0x%x", kr);
++   }
+ 
+    mach_vm_address_t address = (mach_vm_address_t)(uintptr_t)placed_addr;
+    mach_vm_size_t length = 0;
+-   /* IOUserClient::mapClientMemory64 takes the cache mode from THESE flags, not from the descriptor the driver returns, so a plain
+-    * kIOMapAnywhere would give a cached mapping of memory the GPU reads non-cacheable. Write combine is Normal non-cacheable: the
+-    * GPU sees CPU writes after a barrier, and memcpy/unaligned stores stay legal (device-memory mappings fault on those). */
+-   /* With IO-coherent BOs (the kernel reports NativeAdrenoParamsOwnedCoherent) the GPU maps the pages write-back inner-shareable, so the CPU
+-    * view is a write-back one too: a write-combined view of a page the GPU snoops and the kernel's cacheable alias would disagree. */
++   /* Match the GPU's cache mode; a second cache attribute for the same pages is invalid. */
+    uint32_t options = (placed_addr ? 0 : kIOMapAnywhere) |
+                       ((dw.params.flags & NativeAdrenoParamsOwnedCoherent) ? kIOMapCopybackCache : kIOMapWriteCombineCache);
+    kr = IOConnectMapMemory64(dw.conn, reply.token, mach_task_self(), &address, &length, options);
+-   if (kr != KERN_SUCCESS || !address || length < bo->size) {
+-      NativeAdrenoAbiBoCpuUnmap undo = {.handle = bo->darwin_handle, .token = reply.token};
+-      dw_call(NativeAdrenoMethodBoCpuUnmap, &undo, sizeof(undo), NULL, 0);
+-      return vk_errorf(dev, VK_ERROR_MEMORY_MAP_FAILED, "IOConnectMapMemory64 failed: 0x%x", kr);
++   if (kr != KERN_SUCCESS || !address || length < bo->size ||
++       (placed_addr && address != (mach_vm_address_t)(uintptr_t)placed_addr)) {
++      *resource_failure = darwin_cpu_map_resource_failure(kr);
++      return darwin_cpu_map_failure(dev, bo, reply.token, address,
++                                   kr == KERN_SUCCESS, kr, length);
+    }
+ 
+    bo->map = (void *)(uintptr_t)address;
+    bo->darwin_token = reply.token;
+-   /* The mapping belongs to the kernel descriptor; tu_bo_unmap() must not munmap() it. It goes away in bo_finish. */
+    bo->never_unmap = true;
+    TU_RMV(bo_map, dev, bo);
+    return VK_SUCCESS;
++}
++
++static VkResult
++darwin_bo_map(struct tu_device *dev, struct tu_bo *bo, void *placed_addr)
++{
++   bool resource_failure = false;
++   VkResult result = darwin_bo_map_once(dev, bo, placed_addr, &resource_failure);
++   if (result != VK_ERROR_MEMORY_MAP_FAILED || !resource_failure)
++      return result;
++
++   /* A CPU view can exhaust VM resources even after BoAlloc succeeded. Release
++    * only completed cached BOs, then retry once with no outstanding map lease. */
++   struct darwin_retire_state *retire = (struct darwin_retire_state *)dev->darwin_retire;
++   pthread_mutex_lock(&retire->lock);
++   VkResult collected = darwin_reap_locked(dev, retire);
++   bool released = collected == VK_SUCCESS && darwin_cache_flush(dev, retire);
++   VkResult failure = retire->failure;
++   pthread_mutex_unlock(&retire->lock);
++   if (failure != VK_SUCCESS)
++      return failure;
++   if (collected != VK_SUCCESS)
++      return collected;
++   return released ? darwin_bo_map_once(dev, bo, placed_addr, &resource_failure) : result;
+ }
+ 
+ static void

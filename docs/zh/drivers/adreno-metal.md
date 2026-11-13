@@ -60,3 +60,7 @@ python3 scripts/check-native-metal-frontend-host.py
 `wallpaper-freeze=1` 用于隔离壁纸渲染。名字包含 Poster 的渲染进程首次成功绘制并保存至少 200 万像素的 IOSurface 后，保留该输出，拦下后续 command buffer 的 runtime 提交。被拦下的缓冲保持已 commit、未调度状态，继续持有资源和队列名额；此前已提交的工作正常完成。PosterBoard、backboardd 和其他客户端继续提交。此模式默认关闭。
 
 细分延迟记录标出慢编码调用、回调入口地址和资源析构耗时。内核对渲染、编码和完成线程的采样关联上游等待。
+
+Darwin BO 映射失败时先解除 CPU 映射，再释放内核租约。VM 资源不足时，
+回收已完成的缓存 BO 后重试一次。回收失败会保留原生资源并标记设备丢失。
+运行 `python3 scripts/check-turnip-cpu-map-host.py` 可执行主机故障注入检查。

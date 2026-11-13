@@ -60,3 +60,8 @@ With `gpu-trace=1`, kernel event 65 identifies the Metal device and command queu
 Detailed latency records identify slow encoder calls, callback invoke addresses and resource destruction. Kernel sampling of the render, encode and completion threads correlates upstream waits.
 
 With `diag=1`, encoding batch end records (type 14, phase 3) store encoding-thread CPU microseconds in field `d`. Compare this with paired start/end wall time to distinguish work from waits. `TUC` reports Turnip BO cache lookups, hits, inserts, evictions and full flushes.
+
+Darwin BO mapping releases invalid CPU views before their kernel leases. On
+VM resource exhaustion it frees completed cached BOs and retries once. A failed
+rollback retains its native resources and marks the device lost. Run
+`python3 scripts/check-turnip-cpu-map-host.py` for the host fault-injection check.
