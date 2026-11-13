@@ -23,4 +23,4 @@ WindowServer 在 HID 和显示初始化期间反复退出，图形 Recovery 待�
 3. 按[启动验证顺序](/zh/porting/bring-up)逐项验证，通过[日志抓取](/zh/porting/log-capture)保存结果。
 4. 更新[移植记录](/zh/porting/records)，记录实际使用的源码版本及最后确认的阶段。
 
-Native APFS 镜像需要为首次启动和 swap 保留容器空间。[制盘脚本](https://github.com/CrossDarwin/UniXNU_macOS/blob/test_27/scripts/sheng-apfs/README.md#grow-an-existing-container)为新镜像分配 48 GiB，也可扩容副本并保留卷 UUID 和 Data。使用 `vm_stat` 和 `sysctl vm.swapusage` 分别核对内存压缩和磁盘交换。
+Native APFS 镜像需要为首次启动和 swap 保留容器空间。[制盘脚本](https://github.com/CrossDarwin/UniXNU_macOS/blob/test_27/scripts/sheng-apfs/README.md#grow-an-existing-container)为新镜像分配 64 GiB，也可扩容副本并保留卷 UUID 和 Data。使用 `vm_stat` 和 `sysctl vm.swapusage` 分别核对内存压缩和磁盘交换。

@@ -234,7 +234,7 @@ def main():
     parser.add_argument('--uefi', type=Path, help='uefi-sheng source checkout')
     parser.add_argument('--ipsw', help='local IPSW path or URL (default: the pinned macOS profile IPSW)')
     parser.add_argument('--container', type=Path, help='reuse an existing container and its exact receipt')
-    parser.add_argument('--size-gib', type=int, default=48, help='new APFS container size in GiB (default: 48)')
+    parser.add_argument('--size-gib', type=int, default=64, help='new APFS container size in GiB (default: 64)')
     parser.add_argument('--rsync', help='rsync 3 executable for creating the container')
     parser.add_argument('--runtime-dir', type=Path, help='reuse a complete runtime report and its matched addon/trust bundle')
     parser.add_argument('--boot-template', type=Path, help='reuse the verified sheng transport from a boot.img and boot.json directory')

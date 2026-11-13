@@ -76,7 +76,7 @@ The build VM must allow unrestricted filesystem access so root can preserve BSD
 restricted flags and rootless attributes. The command tests this before copying.
 
 ```sh
-sudo python3 scripts/sheng-apfs/make-container.py --size-gib 48 \
+sudo python3 scripts/sheng-apfs/make-container.py --size-gib 64 \
   --rsync /path/to/rsync \
   --system /path/to/OS.dmg --system-os /path/to/SystemOS.dmg \
   --app-os /path/to/AppOS.dmg /path/to/apfs-container
@@ -102,14 +102,16 @@ sudo python3 scripts/sheng-apfs/make-container.py \
 ## Grow an existing container
 
 A populated image needs at least 8 GiB of free APFS space for first boot and
-swap. New builds use 48 GiB. Existing containers keep their current size.
-With about 32 GiB occupied, 48 GiB leaves about 16 GiB for user data,
+swap. New builds use 64 GiB. System, Data and VM share the container's free space without per-volume quotas.
+Existing containers keep their current size when reused; a larger userdata
+partition does not expand the APFS container automatically.
+With about 32 GiB occupied, 64 GiB leaves about 32 GiB for user data,
 caches and demand-allocated swap. To keep an existing image's accounts, files and
 volume UUIDs, grow an APFS clone on the macOS build host:
 
 ```sh
 sudo python3 scripts/sheng-apfs/make-container.py \
-  --grow-container /path/to/current-container --size-gib 48 \
+  --grow-container /path/to/current-container --size-gib 64 \
   /path/to/larger-container
 ```
 

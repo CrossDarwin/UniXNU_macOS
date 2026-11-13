@@ -23,4 +23,4 @@ WindowServer repeatedly exits during HID and display initialization. Graphical R
 3. Follow the [bring-up order](/porting/bring-up) and save results through [log capture](/porting/log-capture).
 4. Update the [porting record](/porting/records) with the source revisions and last confirmed stage.
 
-Native APFS images need free container space for first boot and swap. The [container builder](https://github.com/CrossDarwin/UniXNU_macOS/blob/test_27/scripts/sheng-apfs/README.md#grow-an-existing-container) uses 48 GiB for new images and can grow a clone while preserving volume UUIDs and Data. Memory compression and disk swap must be checked separately with `vm_stat` and `sysctl vm.swapusage`.
+Native APFS images need free container space for first boot and swap. The [container builder](https://github.com/CrossDarwin/UniXNU_macOS/blob/test_27/scripts/sheng-apfs/README.md#grow-an-existing-container) uses 64 GiB for new images and can grow a clone while preserving volume UUIDs and Data. Memory compression and disk swap must be checked separately with `vm_stat` and `sysctl vm.swapusage`.
