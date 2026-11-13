@@ -98,6 +98,10 @@ tree = node('device-tree', [('model', b'qemu-entry-fixture\0'),
                           *([('#address-cells', struct.pack('<I', 2)), ('#size-cells', struct.pack('<I', 2))] if virtio_nodes else []),
                           *([('compatible', args.platform_compatible.encode() + b'\0')] if args.armvirt else [])], [
     node('chosen', [('random-seed', os.urandom(256)),
+                    # XNU derives IOPlatformUUID from these two ARM inputs.
+                    # Keep a stable synthetic identity across fixture reboots.
+                    *([('unique-chip-id', b'QEMUvirt'), ('chip-id', b'QEMU')]
+                      if args.armvirt else []),
                     ('kernel-ctrr-to-be-enabled', struct.pack('<I', 0)),
                     # This fixture's writable Data lives only in the owned
                     # RAMDisk. Publish its actual nonpersistent lifetime via
