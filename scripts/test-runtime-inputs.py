@@ -27,6 +27,18 @@ def seed(path):
 
 
 class RuntimeInputs(unittest.TestCase):
+    def test_native_runtime_requires_grow_helper_qualification(self):
+        with tempfile.TemporaryDirectory() as td:
+            report = Path(td) / 'generated.json'
+            metadata = dict(trust_cache=str(Path(td) / 'trust.bundle'), gpu_addon=str(Path(td) / 'addon.bin'))
+            report.write_text(json.dumps(metadata))
+            with self.assertRaisesRegex(Error, 'regenerate the runtime'):
+                runtime.native_runtime_inputs(report)
+            metadata['native_apfs_grow'] = dict(version=1, log_reserve_bytes=1 << 30)
+            report.write_text(json.dumps(metadata))
+            self.assertEqual(runtime.native_runtime_inputs(report), {
+                'owner_trust_cache': Path(metadata['trust_cache']), 'gpu_addon': Path(metadata['gpu_addon'])})
+
     def context(self, out, explicit=True):
         work = out / 'runtime'
         work.mkdir()

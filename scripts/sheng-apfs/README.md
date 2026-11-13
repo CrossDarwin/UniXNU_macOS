@@ -22,6 +22,18 @@ filesystem. Enter the administrator password at the APFS creation step if
 sudo prompts for it. Use `--ipsw PATH_OR_URL` to provide the pinned IPSW
 yourself or `--rsync PATH` to select rsync 3.
 
+New images start with a 48 GiB APFS container. On first boot, the native driver
+exposes the actual userdata capacity minus a fixed 1 GiB diagnostic reserve.
+The root service grows the container to that boundary. System, Data and VM then
+share the expanded space without per-volume quotas. A larger device uses the
+same initial image; `--size-gib` sets the initial capacity, not the final limit.
+
+Each boot checks the actual container and volume UUIDs before resizing. A
+completed expansion is skipped. A failed attempt preserves the data and records
+the error for the next boot. Read `/var/log/unixnu-apfs-grow.log` and
+`/var/db/unixnu/apfs-grow.json` for the initial, target and actual capacities.
+The service does not format the disk or shrink a container.
+
 Use `--user rinnrei --display-name RinnRei --auto-login` to provision a local
 administrator and skip Setup Assistant. Enter the account password at the
 prompt. Keep that workspace private.
@@ -76,7 +88,7 @@ The build VM must allow unrestricted filesystem access so root can preserve BSD
 restricted flags and rootless attributes. The command tests this before copying.
 
 ```sh
-sudo python3 scripts/sheng-apfs/make-container.py --size-gib 64 \
+sudo python3 scripts/sheng-apfs/make-container.py --size-gib 48 \
   --rsync /path/to/rsync \
   --system /path/to/OS.dmg --system-os /path/to/SystemOS.dmg \
   --app-os /path/to/AppOS.dmg /path/to/apfs-container
@@ -102,12 +114,9 @@ sudo python3 scripts/sheng-apfs/make-container.py \
 ## Grow an existing container
 
 A populated image needs at least 8 GiB of free APFS space for first boot and
-swap. New builds use 64 GiB. System, Data and VM share the container's free space without per-volume quotas.
-Existing containers keep their current size when reused; a larger userdata
-partition does not expand the APFS container automatically.
-With about 32 GiB occupied, 64 GiB leaves about 32 GiB for user data,
-caches and demand-allocated swap. To keep an existing image's accounts, files and
-volume UUIDs, grow an APFS clone on the macOS build host:
+swap. New builds start at 48 GiB and expand on the device. Reusing an image keeps
+its size on the build host. To expand a local image while preserving its accounts,
+files and volume UUIDs, grow an APFS clone on the macOS build host:
 
 ```sh
 sudo python3 scripts/sheng-apfs/make-container.py \
@@ -197,8 +206,9 @@ export UNIXNU_APFS_CONTAINER=/path/to/with-xart/container.json
 ./unixnu bootimg --os macos-27 --device ../device --uefi ../uefi-sheng
 ```
 
-The kernel binds the container size and UUID. The payload binds the System and
-Data volume UUIDs. System mounts read-only, with the dyld cache in that volume.
+The kernel binds the minimum initial size and container UUID, and limits the
+writable medium to userdata minus the diagnostic reserve. The payload binds
+the System, Data and VM volume UUIDs. System mounts read-only, with the dyld cache in that volume.
 The prepared runtime directory supplies the final addon and its matching trust
 bundle through `generated.json`.
 The APFS backend provides writable Data and reserves the end of `userdata`
@@ -207,3 +217,16 @@ signature verification. This profile also accepts older development images whose
 dyld cache lost restricted flags, limited to the bound read-only System volume
 at `/System/Library/dyld`; signature validation remains enabled.
 Installing it replaces the existing `userdata` layout.
+
+## Test automatic growth
+
+Run the disposable image test inside a macOS QEMU VM with at least 6 GiB free:
+
+```sh
+python3 scripts/sheng-apfs/test-grow-macos.py /path/to/new-test-directory
+```
+
+The test grows a 4 GiB container to 8 GiB, checks retry and repeated-start behavior,
+verifies Data and VM writes across the old boundary, and checks the reserved tail.
+It removes the disposable device image after success. Use `--skip-io` to repeat
+the metadata and failure tests without the large allocation.

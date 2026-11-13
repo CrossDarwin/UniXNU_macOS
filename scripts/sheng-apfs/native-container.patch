@@ -15,7 +15,39 @@
  
  static UfsRootDiagnostics gRootDiagnostic;
  static bool gRootDiagnosticEnabled;
-@@ -1894,6 +1902,7 @@
+@@ -1502,6 +1510,7 @@
+ constexpr uint32_t kDefaultReserveMiB = 1024;
+ static uint64_t reserveBlocks (void)
+ {
++  if (nativeApfsRequested()) return kApfsLogReserveBytes / 4096;
+   static int64_t cached = -1;
+   if (cached < 0) {
+     uint32_t mib = kDefaultReserveMiB;
+@@ -1530,7 +1539,8 @@
+ {
+   const char *reason = "";
+   int ok = 0;
+-  if (!storeMode ()) reason = "off";
++  if (nativeApfsRequested()) reason = "native APFS owns userdata";
++  else if (!storeMode ()) reason = "off";
+   else if (!gStoreGeometry.valid || !gHost.ready) reason = "no root layout";
+   else if (gStoreRegionBlocks) reason = "already open";
+   else {
+@@ -1766,7 +1776,12 @@
+     uint64_t partition = gStoreGeometry.last - gStoreGeometry.first + 1;
+     uint64_t imageBlocks = (gStoreGeometry.imageBytes + 4095) / 4096;
+     if (reserveBlocks () < kLogReserveBlocks + kExportBlocks) reason = "reserve too small for the log";
+-    else if (partition - reserveBlocks () < imageBlocks + 1024) reason = "overlaps the root image";
++    else if (nativeApfsRequested() ?
++             (!apfsMediaBytes(partition * 4096ULL) ||
++              reserveBlocks() != kApfsLogReserveBytes / 4096 ||
++              imageBlocks > apfsMediaBytes(partition * 4096ULL) / 4096) :
++             (partition <= reserveBlocks() || partition - reserveBlocks() < imageBlocks + 1024))
++      reason = "overlaps the root image";
+     else {
+       uint64_t first = gStoreGeometry.last + 1 - kLogReserveBlocks;
+       // One write window covers the export region and the log: [first - kExportBlocks, first + kLogReserveBlocks).
+@@ -1894,6 +1909,7 @@
    uint32_t bounceFree = 0;
    IOLock *windowLock = nullptr;   // guards bounceFree
    bool online = false;
@@ -23,7 +55,7 @@
    uint8_t *takeBounce ()
    {
      IOLockLock (windowLock);
-@@ -1948,15 +1957,15 @@
+@@ -1948,15 +1964,15 @@
    char *getProductString () override { return label; }
    char *getRevisionString () override { return const_cast<char *> ("1.0"); }
    char *getAdditionalDeviceInfoString () override { return const_cast<char *> ("UFS LUN 0 userdata window, read-only"); }
@@ -43,16 +75,25 @@
    IOReturn doSynchronize (UInt64, UInt64, IOOptionBits) override { return doSynchronizeCache (); }
    IOReturn getWriteCacheState (bool *value) override { *value = false; return kIOReturnSuccess; }
    IOReturn setWriteCacheState (bool) override { return kIOReturnUnsupported; }
-@@ -2015,6 +2024,8 @@
+@@ -2015,6 +2031,17 @@
    strlcpy (label, name, sizeof (label));
    absolute = absoluteOffset;
    bytes = size;
 +  nativeContainer = !strcmp(name, "APFS") && nativeApfsRequested();
-+  if (nativeContainer && !hostStoreOpen(absolute / 4096, bytes / 4096)) return false;
++  if (nativeContainer) {
++    if (!hostStoreOpen(absolute / 4096, bytes / 4096)) return false;
++    if (!setProperty("UniXNUAPFSGrow", true) ||
++        !setProperty("UniXNUAPFSContainerUUID", UNIXNU_APFS_CONTAINER_UUID) ||
++        !setProperty("UniXNUAPFSSystemUUID", UNIXNU_APFS_SYSTEM_UUID) ||
++        !setProperty("UniXNUAPFSDataUUID", UNIXNU_APFS_DATA_UUID) ||
++        !setProperty("UniXNUAPFSVMUUID", UNIXNU_APFS_VM_UUID) ||
++        !setProperty("UniXNUAPFSInitialBytes", UNIXNU_APFS_BYTES, 64) ||
++        !setProperty("UniXNUAPFSTargetBytes", bytes, 64)) return false;
++  }
    windowLock = IOLockAlloc ();
    if (!windowLock) return false;
    for (unsigned k = 0; k < kBounces; ++k) {
-@@ -2028,6 +2039,10 @@
+@@ -2028,6 +2055,10 @@
  #if defined(NATIVE_VERIFIED_BLOCK) && NATIVE_VERIFIED_BLOCK
    // Reads are served only after each 4096-byte integrity block verifies against the owner-signed
    // policy; without a matching policy the device is never published.
@@ -63,7 +104,7 @@
    return configureVerification ();
  #else
    return true;
-@@ -2341,6 +2356,11 @@
+@@ -2341,6 +2372,11 @@
  
  bool NativeUfsBlock::authenticatesVolume (const char *uuid, uint8_t *manifestDigest)
  {
@@ -75,7 +116,7 @@
    if (!uuid || !online || !verifiedReady) {
      return false;
    }
-@@ -2373,6 +2393,7 @@
+@@ -2373,6 +2409,7 @@
  
  bool NativeUfsBlock::signedVolumeUuid (char out[37]) const
  {
@@ -83,7 +124,7 @@
    if (!verifiedReady) {
      return false;
    }
-@@ -2423,6 +2444,32 @@
+@@ -2423,6 +2460,32 @@
  IOReturn NativeUfsBlock::doAsyncReadWrite (IOMemoryDescriptor *buffer, UInt64 block, UInt64 count,
                                             IOStorageAttributes *, IOStorageCompletion *completion)
  {
@@ -118,19 +159,20 @@
      return kIOReturnBadArgument;
 --- a/RootLayout.h
 +++ b/RootLayout.h
-@@ -156,6 +156,17 @@
+@@ -156,6 +156,18 @@
    layout->ext4Magic = uint32_t (gScratch[1080]) | (uint32_t (gScratch[1081]) << 8);
    layout->ext4Blocks = le32 (gScratch + 1028);
    layout->manifestStatus = 1;
 +  if (nativeApfsRequested()) {
 +    const uint64_t capacity = (layout->userdataLast - layout->userdataFirst + 1) * 4096ULL;
 +    layout->manifestStatus = 4;
-+    if (!apfsContainerLayout(gScratch, capacity, UNIXNU_APFS_BYTES, kNativeApfsContainerUUID)) return true;
++    uint64_t currentBytes = 0;
++    if (!apfsContainerLayout(gScratch, capacity, UNIXNU_APFS_BYTES, kNativeApfsContainerUUID, &currentBytes)) return true;
 +    layout->manifestStatus = 0;
-+    layout->imageBytes = UNIXNU_APFS_BYTES;
++    layout->imageBytes = currentBytes;
 +    layout->windows = 1;
 +    strlcpy(layout->window[0].name, "APFS", sizeof(layout->window[0].name));
-+    layout->window[0].size = UNIXNU_APFS_BYTES;
++    layout->window[0].size = apfsMediaBytes(capacity);
 +    return true;
 +  }
    if (layout->magic0 == 0x474e4853U && layout->magic1 == 0x544f4f52U) {        // "SHNGROOT"

@@ -163,6 +163,8 @@ def prepare(ctx, kernel_build=False):
 def native_runtime_inputs(report):
     try:
         generated = json.loads(report.read_text())
+        if generated.get('native_apfs_grow') != {'version': 1, 'log_reserve_bytes': 1 << 30}:
+            raise Error('Native APFS runtime lacks automatic growth; regenerate the runtime before building')
         return {'owner_trust_cache': Path(generated['trust_cache']).expanduser().resolve(),
                 'gpu_addon': Path(generated['gpu_addon']).expanduser().resolve()}
     except (OSError, ValueError, KeyError, TypeError) as error:

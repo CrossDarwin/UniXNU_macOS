@@ -435,6 +435,19 @@ def main():
             for directory in (bins, daemons, agents):
                 directory.mkdir(parents=True)
             shutil.copyfile(ROOT / 'scripts/sheng-apfs/safari.sh', bins / 'Safari.sh')
+            grow = bins / 'ApfsGrow'
+            sdk = subprocess.check_output(['xcrun', '--sdk', 'macosx', '--show-sdk-path'], text=True).strip()
+            run('xcrun', '--sdk', 'macosx', 'clang', '-target', 'arm64e-apple-macos27.0',
+                '-isysroot', sdk, '-O2', '-Wall', '-Wextra', '-Werror',
+                ROOT / 'scripts/sheng-apfs/ApfsGrow.c', '-framework', 'CoreFoundation',
+                '-framework', 'IOKit', '-o', grow)
+            run('codesign', '--force', '--sign', '-', '--pagesize', '4096',
+                '--identifier', 'org.unixnu.apfs-grow', grow)
+            (daemons / 'org.unixnu.apfs-grow.plist').write_bytes(plistlib.dumps(dict(
+                Label='org.unixnu.apfs-grow', RunAtLoad=True, ProcessType='Background',
+                ProgramArguments=['/private/var/ngpu/bin/ApfsGrow'],
+                StandardOutPath='/var/log/unixnu-apfs-grow.log',
+                StandardErrorPath='/var/log/unixnu-apfs-grow.log')))
             for action, jobs, extra in (('repair', daemons, {
                     'StandardOutPath': '/var/log/unixnu-safari-repair.log',
                     'StandardErrorPath': '/var/log/unixnu-safari-repair.log'}),
@@ -477,7 +490,7 @@ def main():
             addon = out / 'test-addon.bin'
             candidate.replace(addon)
         if trust is not None and (request.get('wifi_tool') or bluetooth_report is not None or appsync_report is not None
-                                  or absent_report is not None):
+                                  or absent_report is not None or request.get('native_apfs')):
             # Keep every original module intact. Append only absent hashes;
             # rebuilding from a previously integrated addon stays idempotent.
             hashes = addon_hashes(addon, work / 'signed-addon', request.get('audio_system_plugins', ()),
@@ -514,7 +527,9 @@ def main():
             candidate.replace(trust)
         (out / 'generated.json').write_text(json.dumps(dict(data_ramdisk=str(seed) if seed else None,
                                                           gpu_addon=str(addon) if addon else None,
-                                                          trust_cache=str(trust)), indent=2) + '\n')
+                                                          trust_cache=str(trust),
+                                                          **({'native_apfs_grow': {'version': 1, 'log_reserve_bytes': 1 << 30}}
+                                                             if request.get('native_apfs') else {})), indent=2) + '\n')
 
 
 if __name__ == '__main__':

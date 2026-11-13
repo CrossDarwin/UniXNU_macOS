@@ -25,7 +25,7 @@
  #endif
    }
 +  bool nativeApfs = false;
-+  IOReturn transferSectors(uint64_t, uint32_t, bool);
++  IOReturn transferSectors(uint64_t, uint32_t, bool, bool flush = false);
    bool online = false;
    bool ownsDevice = false;
    uint32_t read32(unsigned offset) const {
@@ -42,54 +42,68 @@
  #if defined(NATIVE_VERIFIED_BLOCK) && NATIVE_VERIFIED_BLOCK
    bool authenticatesVolume(const char *, uint8_t * = nullptr) const;
  #endif
-@@ -136,7 +151,7 @@
+@@ -136,10 +151,17 @@
      *present = online; if (changed) *changed = false; return kIOReturnSuccess;
    }
    IOReturn reportRemovability(bool *value) override { *value = false; return kIOReturnSuccess; }
 -  IOReturn reportWriteProtection(bool *value) override { *value = true; return kIOReturnSuccess; }
+-  IOReturn doSynchronizeCache() override { return online ? kIOReturnSuccess : kIOReturnNotReady; }
 +  IOReturn reportWriteProtection(bool *value) override { *value = !nativeApfs; return kIOReturnSuccess; }
-   IOReturn doSynchronizeCache() override { return online ? kIOReturnSuccess : kIOReturnNotReady; }
++  IOReturn doSynchronizeCache() override {
++    if (!online) return kIOReturnNotReady;
++    if (!nativeApfs) return kIOReturnSuccess;
++    IOLockLock(gate);
++    IOReturn result = transferSectors(0, 0, true, true);
++    IOLockUnlock(gate);
++    return result;
++  }
    IOReturn doSynchronize(UInt64, UInt64, IOOptionBits) override { return doSynchronizeCache(); }
-   IOReturn getWriteCacheState(bool *value) override { *value = false; return kIOReturnSuccess; }
-@@ -177,9 +192,11 @@
+-  IOReturn getWriteCacheState(bool *value) override { *value = false; return kIOReturnSuccess; }
++  IOReturn getWriteCacheState(bool *value) override { *value = nativeApfs; return kIOReturnSuccess; }
+   IOReturn setWriteCacheState(bool) override { return kIOReturnUnsupported; }
+   IOReturn doAsyncReadWrite(IOMemoryDescriptor *, UInt64, UInt64, IOStorageAttributes *, IOStorageCompletion *) override;
+ };
+@@ -177,9 +199,11 @@
    write32(0x14, 1);
    uint32_t highFeatures = read32(0x10);
    // A read-only backend and VIRTIO_F_VERSION_1 are mandatory for this driver.
 -  if (!(lowFeatures & (1U << 5)) || !(highFeatures & 1)) return false;
 +  int requested = 0;
 +  const bool apfs = PE_parse_boot_argn("native-apfs-root", &requested, sizeof(requested)) && requested == 1;
-+  if ((!apfs && !(lowFeatures & (1U << 5))) || !(highFeatures & 1)) return false;
++  if ((!apfs && !(lowFeatures & (1U << 5))) || (apfs && !(lowFeatures & (1U << 9))) || !(highFeatures & 1)) return false;
    write32(0x24, 0);
 -  write32(0x20, 1U << 5);
-+  write32(0x20, lowFeatures & (1U << 5));
++  write32(0x20, (lowFeatures & (1U << 5)) | (apfs ? (1U << 9) : 0));
    write32(0x24, 1);
    write32(0x20, 1);
    write32(0x70, 11);
-@@ -450,16 +467,21 @@
+@@ -450,16 +474,21 @@
  IOReturn NativeVirtioBlock::readSectors(uint64_t sector, uint32_t bytes)
  #endif
  {
+-  if (!online || !bytes || bytes > transferSize || (bytes & 511) ||
 +  return transferSectors(sector, bytes, false);
 +}
 +
-+IOReturn NativeVirtioBlock::transferSectors(uint64_t sector, uint32_t bytes, bool writing)
++IOReturn NativeVirtioBlock::transferSectors(uint64_t sector, uint32_t bytes, bool writing, bool flush)
 +{
-   if (!online || !bytes || bytes > transferSize || (bytes & 511) ||
++  if (!online || (!bytes && !flush) || (flush && (bytes || sector)) || bytes > transferSize || (bytes & 511) ||
        sector >= capacity || bytes / 512 > capacity - sector) return kIOReturnBadArgument;
    auto *queue = static_cast<unsigned char *>(queueMemory->getBytesNoCopy());
    auto *descriptors = reinterpret_cast<Descriptor *>(queue);
    auto *request = reinterpret_cast<Request *>(queue + 512);
    volatile uint8_t *status = queue + 528;
 -  *request = {0, 0, sector};
-+  *request = {writing ? 1U : 0U, 0, sector};
++  *request = {flush ? 4U : writing ? 1U : 0U, 0, sector};
    *status = 0xff;
-   descriptors[0] = {queuePhysical + 512, sizeof(Request), 1, 1};
+-  descriptors[0] = {queuePhysical + 512, sizeof(Request), 1, 1};
 -  descriptors[1] = {transferPhysical, bytes, 3, 2};
++  descriptors[0] = {queuePhysical + 512, sizeof(Request), 1, static_cast<uint16_t>(flush ? 2 : 1)};
 +  descriptors[1] = {transferPhysical, bytes, static_cast<uint16_t>(writing ? 1 : 3), 2};
    descriptors[2] = {queuePhysical + 528, 1, 2, 0};
    auto *available = reinterpret_cast<volatile uint16_t *>(queue + 128);
    available[2 + availableIndex % queueSize] = 0;
-@@ -470,9 +492,13 @@
+@@ -470,9 +499,13 @@
    write32(0x50, 0);
    auto *used = reinterpret_cast<volatile uint16_t *>(queue + 256);
    uint64_t deadline;
@@ -104,7 +118,7 @@
        reset();
        __atomic_fetch_add(&native_virtio_read_failures, 1, __ATOMIC_RELAXED);
        return kIOReturnTimeout;
-@@ -483,11 +509,13 @@
+@@ -483,11 +516,13 @@
    dmaBarrier();
    auto *element = reinterpret_cast<volatile Used *>(queue + 260) + usedIndex % queueSize;
    bool valid = used[1] == static_cast<uint16_t>(usedIndex + 1) && element->id == 0 &&
@@ -119,7 +133,7 @@
      reset();
      __atomic_fetch_add(&native_virtio_read_failures, 1, __ATOMIC_RELAXED);
      return kIOReturnIOError;
-@@ -507,10 +535,20 @@
+@@ -507,10 +542,29 @@
    ownsDevice = true;
    gate = IOLockAlloc();
    if (!gate || !configureQueue()) return false;
@@ -129,10 +143,19 @@
 -  if (readSectors(0, 512)) return false;
 +  int requested = 0;
 +  if (PE_parse_boot_argn("native-apfs-root", &requested, sizeof(requested)) && requested == 1) {
-+    if (capacity != UNIXNU_APFS_BYTES / 512 || transferSectors(0, 4096, false)) return false;
++    if (capacity > UINT64_MAX / 512 || transferSectors(0, 4096, false)) return false;
 +    const auto *header = static_cast<const uint8_t *>(transferMemory->getBytesNoCopy());
-+    if (!apfsContainerLayout(header, UNIXNU_APFS_BYTES + (1ULL << 30),
++    if (!apfsContainerLayout(header, capacity * 512,
 +                                    UNIXNU_APFS_BYTES, kNativeApfsContainerUUID)) return false;
++    capacity = apfsMediaBytes(capacity * 512) / 512;
++    if (!setProperty("UniXNUAPFSGrow", true) ||
++        !setProperty("UniXNUAPFSContainerUUID", UNIXNU_APFS_CONTAINER_UUID) ||
++        !setProperty("UniXNUAPFSSystemUUID", UNIXNU_APFS_SYSTEM_UUID) ||
++        !setProperty("UniXNUAPFSDataUUID", UNIXNU_APFS_DATA_UUID) ||
++        !setProperty("UniXNUAPFSVMUUID", UNIXNU_APFS_VM_UUID) ||
++        !setProperty("UniXNUAPFSInitialBytes", UNIXNU_APFS_BYTES, 64) ||
++        !setProperty("UniXNUAPFSTargetBytes", capacity * 512, 64)) return false;
++
 +    nativeApfs = true;
 +    native_apfs_virtio_identity = native_apfs_virtio_authenticates;
 +    IOLog("NativeVirtioBlock: unsealed APFS test transport - %s\n", UNIXNU_APFS_MARKER);
@@ -144,7 +167,7 @@
    SHA256_CTX hash;
    SHA256_Init(&hash);
    SHA256_Update(&hash, readBuffer(), 512);
-@@ -531,7 +569,8 @@
+@@ -531,7 +585,8 @@
  {
    if (!buffer || !completion || !completion->action || !count || block >= capacity ||
        count > capacity - block || count > UINT64_MAX / 512 || buffer->getLength() < count * 512) return kIOReturnBadArgument;
@@ -154,7 +177,7 @@
    uint64_t actual = 0;
    IOReturn result = kIOReturnNotReady;
    IOLockLock(gate);
-@@ -542,9 +581,13 @@
+@@ -542,9 +597,13 @@
      constexpr unsigned chunkSize = transferSize;
  #endif
      uint32_t bytes = static_cast<uint32_t>(count * 512 - actual > chunkSize ? chunkSize : count * 512 - actual);
@@ -170,7 +193,7 @@
        result = kIOReturnIOError;
        break;
      }
-@@ -574,3 +617,10 @@
+@@ -574,3 +633,10 @@
    if (gate) { IOLockFree(gate); gate = nullptr; }
    IOBlockStorageDevice::free();
  }

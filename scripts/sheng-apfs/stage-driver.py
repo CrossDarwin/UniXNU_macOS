@@ -25,6 +25,7 @@ def write_config(destination, receipt):
               '#pragma once\n'
               f'#define UNIXNU_APFS_MARKER "{marker(fingerprint)}"\n'
               f'#define UNIXNU_APFS_BYTES {metadata["bytes"]}ULL\n'
+              f'#define UNIXNU_APFS_CONTAINER_UUID "{metadata["container_uuid"].upper()}"\n'
               f'#define UNIXNU_APFS_SYSTEM_UUID "{metadata["system_uuid"].upper()}"\n'
               f'#define UNIXNU_APFS_DATA_UUID "{volumes["Data"]["uuid"].upper()}"\n'
               f'#define UNIXNU_APFS_VM_UUID "{volumes["VM"]["uuid"].upper()}"\n')
