@@ -101,6 +101,10 @@ while index < len(arguments):
 command.extend(['-Wall', '-Wextra', '-Werror', '-Wno-unused-parameter',
                 '-Wno-c99-designator', '-Wno-reorder-init-list', '-Wno-deprecated-enum-enum-conversion',
                 '-Wno-unnecessary-virtual-specifier', '-I', str(ROOT / '.cache/xnu-work/osfmk')])
+if sys.platform == 'darwin' and '-isysroot' not in command:
+    # Driver records target iOS even for the macOS personality. Ignore the host shell's Mac SDK.
+    sdk = subprocess.check_output(['xcrun', '--sdk', 'iphoneos', '--show-sdk-path'], text=True).strip()
+    command.extend(['-isysroot', sdk])
 if identifier == 'VirtioMmioBlock' and os.environ.get('UNIXNU_APFS_CONTAINER'):
     storage = ROOT / 'build/sheng-source-storage'
     command[1:1] = ['-I', str(storage / 'headers/include')]
