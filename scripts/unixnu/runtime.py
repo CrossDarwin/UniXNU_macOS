@@ -165,9 +165,9 @@ def prepare(ctx, kernel_build=False):
 def native_runtime_inputs(report, *, diagnostics=False):
     try:
         generated = json.loads(report.read_text())
-        if generated.get('native_apfs_grow') != {'version': 1, 'log_reserve_bytes': 1 << 30}:
+        if generated.get('native_apfs_grow') != {'version': 2, 'log_reserve_bytes': 1 << 30}:
             raise Error('Native APFS runtime lacks automatic growth; regenerate the runtime before building')
-        if diagnostics and generated.get('desktop_diagnostics') != {'version': 2, 'interval_seconds': 5}:
+        if diagnostics and generated.get('desktop_diagnostics') != {'version': 3, 'interval_seconds': 5}:
             raise Error('Native APFS runtime lacks continuous diagnostics; regenerate the runtime before building')
         return {'owner_trust_cache': Path(generated['trust_cache']).expanduser().resolve(),
                 'gpu_addon': Path(generated['gpu_addon']).expanduser().resolve()}

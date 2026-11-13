@@ -178,25 +178,67 @@ def addon_hashes(path, work, system_bundles=(), system_executables=None):
     return sorted(set(hashes))
 
 
+def owner_job_inputs(addon, work):
+    """Collect final owner daemons after all addon layers have been applied."""
+    data = addon.read_bytes()
+    if len(data) < 24 or data[:8] != b'NGPUADD2' or struct.unpack_from('<Q', data, 16)[0] != len(data):
+        raise ValueError('invalid addon for owner job collection')
+    daemons = work / 'daemons'
+    daemons.mkdir(parents=True)
+    cached = None
+    at = 24
+    for _ in range(struct.unpack_from('<I', data, 8)[0]):
+        length, _, size, packed = struct.unpack_from('<IIQQ', data, at)
+        at += 24
+        if not 1 < length <= 160 or at + length > len(data):
+            raise ValueError('invalid addon job path')
+        name = data[at:at + length - 1].decode()
+        at += (length + 7) & ~7
+        if name.startswith('/') or '..' in Path(name).parts or at + packed > len(data):
+            raise ValueError('invalid addon job entry')
+        job = name.startswith('Library/LaunchDaemons/') and name.endswith('.plist')
+        if job or name == 'xpc/launchd.plist':
+            body = zlib.decompress(data[at:at + packed])
+            if len(body) != size:
+                raise ValueError('invalid addon job size')
+            destination = daemons / Path(name).name if job else work / 'source.plist'
+            destination.write_bytes(body)
+            if not job:
+                cached = destination
+        at += (packed + 7) & ~7
+    if at != len(data):
+        raise ValueError('invalid addon job length')
+    return daemons, cached
+
+
 def merge_launchd_cache(source, daemons, destination, job_environment=None, job_overrides=None):
     """Add owner jobs and board-selected environment values to the OS launchd cache."""
     original = plistlib.loads(source.read_bytes())
     merged = plistlib.loads(source.read_bytes())
     jobs = merged['LaunchDaemons']
     added = []
+    updated = []
+    present = False
     for path in sorted(daemons.glob('*.plist')):
         job = plistlib.loads(path.read_bytes())
         if not job['Label'].startswith('org.unixnu.'):
             raise ValueError('owner service label required: ' + str(path))
         key = '/System/Library/LaunchDaemons/' + path.name
+        present = True
         if key in jobs:
-            raise ValueError('OS launchd cache already owns ' + key)
+            if jobs[key].get('Label') != job['Label']:
+                raise ValueError('OS launchd cache already owns ' + key)
+            if jobs[key] != job:
+                updated.append(key)
+            jobs[key] = job
+            continue
         jobs[key] = job
         added.append(key)
-    if not added and not job_environment and not job_overrides:
+    if not present and not job_environment and not job_overrides:
         raise ValueError('no owner launchd jobs or selected OS job changes')
     assert all(merged[key] == value for key, value in original.items() if key != 'LaunchDaemons')
-    assert all(jobs[key] == value for key, value in original['LaunchDaemons'].items())
+    assert all(jobs[key] == value for key, value in original['LaunchDaemons'].items()
+               if not value.get('Label', '').startswith('org.unixnu.'))
     for label, environment in (job_environment or {}).items():
         matches = [jobs[key] for key, job in original['LaunchDaemons'].items() if job.get('Label') == label]
         if len(matches) != 1:
@@ -226,8 +268,8 @@ def merge_launchd_cache(source, daemons, destination, job_environment=None, job_
     assert plistlib.loads(destination.read_bytes()) == merged
     return dict(source_sha256=hashlib.sha256(source.read_bytes()).hexdigest(),
                 output_sha256=hashlib.sha256(destination.read_bytes()).hexdigest(),
-                original_jobs=len(original['LaunchDaemons']), added_jobs=added,
-                original_entries_preserved=not job_environment and not job_overrides,
+                original_jobs=len(original['LaunchDaemons']), added_jobs=added, updated_jobs=updated,
+                original_entries_preserved=not job_environment and not job_overrides and not updated,
                 job_environment=job_environment or {}, job_overrides=job_overrides or {}, serializer='Apple plutil binary1')
 
 
@@ -472,6 +514,22 @@ def main():
                    'Library/LaunchDaemons', daemons, 'Library/LaunchAgents', agents)
             addon = out / 'safari-addon.bin'
             candidate.replace(addon)
+        if request.get('target') == 'macos27' and addon is not None and (
+                request.get('native_apfs') or request.get('desktop_diagnostics')):
+            bootstrap = work / 'owner-bootstrap'
+            daemons, cached = owner_job_inputs(addon, bootstrap)
+            cache = bootstrap / 'xpc/launchd.plist'
+            if cached:
+                cache_report = merge_launchd_cache(cached, daemons, cache)
+            else:
+                with os_mount(request['os_image'], bootstrap) as mount:
+                    cache_report = merge_launchd_cache(mount / 'System/Library/xpc/launchd.plist', daemons, cache)
+            cache_report.update(sign_launchd_cache(cache))
+            candidate = work / 'owner-bootstrap-addon.bin'
+            script('addon-add-dir.py', addon, candidate, 'xpc', cache.parent)
+            addon = out / 'owner-bootstrap-addon.bin'
+            candidate.replace(addon)
+            (out / 'owner-bootstrap.json').write_text(json.dumps(cache_report, indent=2) + '\n')
         test_scripts = os.environ.get('UNIXNU_MACOS_TEST')
         if request.get('target') == 'macos27' and addon is not None and test_scripts:
             # Unattended testing only (never set for a release): UNIXNU_MACOS_TEST names a directory with daemon.sh (run as root at
@@ -536,9 +594,9 @@ def main():
         (out / 'generated.json').write_text(json.dumps(dict(data_ramdisk=str(seed) if seed else None,
                                                           gpu_addon=str(addon) if addon else None,
                                                           trust_cache=str(trust),
-                                                          **({'native_apfs_grow': {'version': 1, 'log_reserve_bytes': 1 << 30}}
+                                                          **({'native_apfs_grow': {'version': 2, 'log_reserve_bytes': 1 << 30}}
                                                              if request.get('native_apfs') else {}),
-                                                          **({'desktop_diagnostics': {'version': 2, 'interval_seconds': 5}}
+                                                          **({'desktop_diagnostics': {'version': 3, 'interval_seconds': 5}}
                                                              if request.get('desktop_diagnostics') else {})), indent=2) + '\n')
 
 

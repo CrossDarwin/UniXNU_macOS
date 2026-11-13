@@ -34,13 +34,13 @@ class RuntimeInputs(unittest.TestCase):
             report.write_text(json.dumps(metadata))
             with self.assertRaisesRegex(Error, 'regenerate the runtime'):
                 runtime.native_runtime_inputs(report)
-            metadata['native_apfs_grow'] = dict(version=1, log_reserve_bytes=1 << 30)
+            metadata['native_apfs_grow'] = dict(version=2, log_reserve_bytes=1 << 30)
             report.write_text(json.dumps(metadata))
             self.assertEqual(runtime.native_runtime_inputs(report), {
                 'owner_trust_cache': Path(metadata['trust_cache']), 'gpu_addon': Path(metadata['gpu_addon'])})
             with self.assertRaisesRegex(Error, 'continuous diagnostics'):
                 runtime.native_runtime_inputs(report, diagnostics=True)
-            metadata['desktop_diagnostics'] = dict(version=2, interval_seconds=5)
+            metadata['desktop_diagnostics'] = dict(version=3, interval_seconds=5)
             report.write_text(json.dumps(metadata))
             self.assertEqual(runtime.native_runtime_inputs(report, diagnostics=True)['gpu_addon'], Path(metadata['gpu_addon']))
 
