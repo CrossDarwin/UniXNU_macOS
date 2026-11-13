@@ -222,6 +222,8 @@ def package(args, work):
     checksums += f"{record['boot_sha256']}  boot/boot.img\n{record['payload_sha256']}  boot/payload.img\n"
     (work / 'SHA256SUMS').write_text(checksums)
     print(f'Images and SHA256SUMS - {work}', flush=True)
+    if not args.raw_only:
+        print(f'Flash userdata image - {destination / "rootfs.fastboot.img"}', flush=True)
 
 
 def main():

@@ -43,6 +43,15 @@ and `rootfs/rootfs.fastboot.img`. Verify the package from the workspace with
 `shasum -a 256 -c SHA256SUMS`. Installing the root filesystem replaces
 `userdata`.
 
+Android sparse output is enabled by default. Flash `rootfs/rootfs.fastboot.img`
+to avoid fastboot scanning the full logical capacity of `rootfs/rootfs.img`.
+Use `--raw-only` only when the Android sparse transport is not needed.
+Packaging checks the extra storage requirement before encoding.
+
+```sh
+fastboot -S 512M flash userdata rootfs/rootfs.fastboot.img
+```
+
 Use `--boot-template DIR` to reuse a verified sheng transport. The directory
 must contain the version 0 `boot.img` and its `boot.json`. Use
 `--runtime-dir DIR` to reuse an existing matched GPU addon and trust bundle.
