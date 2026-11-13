@@ -3,17 +3,22 @@
 #define main diagnostics_main
 #include "DesktopDiagnostics.c"
 #undef main
+#include <pthread.h>
 #include <sys/mman.h>
+#include <sys/resource.h>
 
 static int report_fd;
 static uint64_t report_seq;
 static char report_session[37];
+static bool foreground_workload;
 static void report(const char *phase) {
     size_t n = 0;
     char *text = sample(++report_seq, report_session, 0, 0, 0, 0, true, &n);
     if (!text) exit(10);
     char *payload;
-    int len = asprintf(&payload, "%.*s,\"phase\":\"%s\"}", (int)n - 1, text, phase);
+    int len = asprintf(&payload, "%.*s,\"phase\":\"%s\",\"priority_mode\":\"%s\",\"requested_disk_policy\":%d}",
+        (int)n - 1, text, phase, foreground_workload ? "foreground" : "inherited",
+        getiopolicy_np(IOPOL_TYPE_DISK, IOPOL_SCOPE_PROCESS));
     free(text);
     if (len < 0) exit(10);
     char *record;
@@ -35,9 +40,27 @@ static void cache_read(int fd, size_t bytes, uint64_t expected) {
     if (sum != expected) { fprintf(stderr, "Cache data mismatch\n"); exit(13); }
 }
 int main(int argc, char **argv) {
-    if (argc < 2 || argc > 3) { fprintf(stderr, "Usage: QemuReclaim DIRECTORY [WORKLOAD_MIB]\n"); return 2; }
-    unsigned mib = argc == 3 ? number(argv[2]) : 832;
+    if (argc < 2 || argc > 4 || (argc == 4 && strcmp(argv[3], "--foreground"))) {
+        fprintf(stderr, "Usage: QemuReclaim DIRECTORY [WORKLOAD_MIB [--foreground]]\n"); return 2;
+    }
+    unsigned mib = argc >= 3 ? number(argv[2]) : 832;
     if (mib < 64 || mib > 4096) return 2;
+    // The root launchd harness otherwise inherits background page-in throttling.
+    foreground_workload = argc == 4;
+    if (foreground_workload) {
+        int previous_policy = getiopolicy_np(IOPOL_TYPE_DISK, IOPOL_SCOPE_PROCESS);
+        if (previous_policy < 0 ||
+            setiopolicy_np(IOPOL_TYPE_DISK, IOPOL_SCOPE_PROCESS, IOPOL_STANDARD) < 0) {
+            perror("Set workload disk policy"); return 14;
+        }
+        int qos_error = pthread_set_qos_class_self_np(QOS_CLASS_USER_INITIATED, 0);
+        if (qos_error) { errno = qos_error; perror("Set workload QoS"); return 14; }
+        printf("Memory test - foreground workload - disk policy %d -> %d\n",
+               previous_policy, getiopolicy_np(IOPOL_TYPE_DISK, IOPOL_SCOPE_PROCESS));
+    } else {
+        printf("Memory test - inherited scheduling - disk policy %d\n",
+               getiopolicy_np(IOPOL_TYPE_DISK, IOPOL_SCOPE_PROCESS));
+    }
     char log[1024], file[1024];
     if (strlen(argv[1]) > 850) return 2;
     snprintf(log, sizeof log, "%s/reclaim.log", argv[1]);
@@ -80,6 +103,10 @@ int main(int argc, char **argv) {
         if (a != tag || b != tag) return 8;
         if (off >= 64 * 1024 * 1024) { if (memcmp(p + off + 8, seed + 8, page - 16)) return 9; }
         else for (size_t i = 8; i < page - 8; ++i) if (p[off + i] != 'A') return 9;
+        if (!((off + page) % (256 * 1024 * 1024))) {
+            char phase[64]; snprintf(phase, sizeof phase, "verified_%zu_MiB", (off + page) / (1024 * 1024));
+            report(phase);
+        }
     }
     report("memory_verified");
     if (munmap(p, size)) return 10;
@@ -87,7 +114,7 @@ int main(int argc, char **argv) {
     cache_read(cache, cache_bytes, sum); report("cache_read_after_pressure");
     close(cache);
     if (unlink(file) || sync_parent(file)) return 11;
-    report("PASS");
+    report("complete");
     close(report_fd);
     return 0;
 }
