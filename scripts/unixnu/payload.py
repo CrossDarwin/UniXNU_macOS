@@ -33,9 +33,9 @@ def check_args(arguments):
         if not re.fullmatch(r'[A-Za-z0-9_.\-]+(=[A-Za-z0-9_.,/\-:=]+)?', value):
             raise Error(f'unsupported kernel argument: {value}')
     line = ' '.join(arguments)
-    # DarwinBoot copies the command line into a 1024-byte buffer and refuses a longer one.
-    if len(line) > 1000:
-        raise Error(f'the kernel command line is {len(line)} bytes; the limit is 1000')
+    # DarwinBoot.c and DARWIN_BOOT_ARGS reserve one byte of CommandLine[1024] for NUL.
+    if len(line) > 1023:
+        raise Error(f'the kernel command line is {len(line)} bytes; the limit is 1023')
     return line
 
 
