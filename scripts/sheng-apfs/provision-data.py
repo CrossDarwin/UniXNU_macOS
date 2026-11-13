@@ -14,6 +14,8 @@ import sys
 import tempfile
 from pathlib import Path
 
+from layout import ensure_cryptex_view
+
 
 def load_script(path):
     spec = importlib.util.spec_from_file_location(path.stem, path)
@@ -84,6 +86,7 @@ def main():
             reference = container.container_for(devices)['ContainerReference']
             device = container.volume(reference, uuid=receipt['volumes']['Data']['uuid'])
             with container.mounted(device) as data:
+                ensure_cryptex_view(data)
                 provision(seed, data, args.user, args.display_name, password, args.auto_login)
         with container.checked_container(disk) as layout:
             if any(layout[key] != receipt[key] for key in layout):

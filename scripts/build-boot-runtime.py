@@ -429,6 +429,29 @@ def main():
             script('addon-add-dir.py', addon, candidate, 'bin', bins, 'Library/LaunchDaemons', jobs)
             addon = out / 'desktop-addon.bin'
             candidate.replace(addon)
+        if request.get('native_apfs'):
+            safari = work / 'safari'
+            bins, daemons, agents = (safari / name for name in ('bin', 'daemons', 'agents'))
+            for directory in (bins, daemons, agents):
+                directory.mkdir(parents=True)
+            shutil.copyfile(ROOT / 'scripts/sheng-apfs/safari.sh', bins / 'Safari.sh')
+            for action, jobs, extra in (('repair', daemons, {
+                    'StandardOutPath': '/var/log/unixnu-safari-repair.log',
+                    'StandardErrorPath': '/var/log/unixnu-safari-repair.log'}),
+                                         ('register', agents, {'LimitLoadToSessionType': 'Aqua'})):
+                label = f'org.unixnu.safari-{action}'
+                (jobs / f'{label}.plist').write_bytes(plistlib.dumps(dict(
+                    Label=label, RunAtLoad=True, ProcessType='Background',
+                    KeepAlive={'SuccessfulExit': False}, ThrottleInterval=30,
+                    ProgramArguments=['/bin/bash', '/private/var/ngpu/bin/Safari.sh', action], **extra)))
+            candidate = work / 'safari-addon.bin'
+            if addon is None:
+                addon = work / 'safari-empty.bin'
+                addon.write_bytes(b'NGPUADD2' + struct.pack('<IIQ', 0, 0, 24))
+            script('addon-add-dir.py', addon, candidate, 'bin', bins,
+                   'Library/LaunchDaemons', daemons, 'Library/LaunchAgents', agents)
+            addon = out / 'safari-addon.bin'
+            candidate.replace(addon)
         test_scripts = os.environ.get('UNIXNU_MACOS_TEST')
         if request.get('target') == 'macos27' and addon is not None and test_scripts:
             # Unattended testing only (never set for a release): UNIXNU_MACOS_TEST names a directory with daemon.sh (run as root at

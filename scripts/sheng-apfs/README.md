@@ -42,6 +42,12 @@ and loginwindow. `boot-callout-trace=1` records callback CPU totals and active
 callbacks in the persistent log. `CALL kind=0` identifies a thread call;
 `kind=1` identifies its timer action. Their CPU totals overlap.
 
+The Data Cryptex view preserves the original Safari shortcut. Native APFS boot
+repairs missing view paths and registers Safari in the Aqua session. Read
+`/var/log/unixnu-safari-repair.log` and
+`~/Library/Logs/UniXNU/Safari.log` when Safari is absent from the launcher.
+
+
 If packaging fails after the boot build, retry the last step:
 
 ```sh
@@ -96,7 +102,7 @@ swap. New builds use 64 GiB. To keep an existing image's accounts, files and
 volume UUIDs, grow an APFS clone on the macOS build host:
 
 ```sh
-python3 scripts/sheng-apfs/make-container.py \
+sudo python3 scripts/sheng-apfs/make-container.py \
   --grow-container /path/to/current-container --size-gib 64 \
   /path/to/larger-container
 ```

@@ -29,7 +29,7 @@ class CapacityTest(unittest.TestCase):
             source.mkdir()
             (source / 'container.apfs').write_bytes(bytes(4096))
             (source / 'container.json').write_text(json.dumps(
-                {'format': 'sheng-apfs-v1', 'bytes': 4096}))
+                {'format': 'sheng-apfs-v1', 'bytes': 4096, 'fixture': True}))
             stage = base / '.output.incomplete'
             stage.mkdir()
             sentinel = stage / 'existing-data'

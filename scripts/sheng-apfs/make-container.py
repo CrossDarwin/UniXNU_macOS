@@ -14,6 +14,7 @@ from contextlib import ExitStack, contextmanager
 from pathlib import Path
 
 from image import geometry, hash_image
+from layout import ensure_cryptex_view
 from metadata import check_file_flags, restore_metadata
 from xart import assign_role
 
@@ -181,6 +182,8 @@ def populate(args, system, data, preboot, stage):
         app_done.touch()
 
     restore_all_metadata(args, system, data, preboot, stage)
+    with mounted(data) as target:
+        ensure_cryptex_view(target)
 
 
 def restore_all_metadata(args, system, data, preboot, stage):
@@ -260,6 +263,8 @@ def grow_container(args, output):
         raise ValueError('Baseline image and receipt do not agree')
     if size <= before['bytes']:
         raise ValueError('The new container must be larger than the baseline')
+    if not before['fixture'] and os.geteuid() != 0:
+        raise ValueError('Run populated container growth as root to preserve Data ownership')
     stage = output.with_name('.' + output.name + '.incomplete')
     with output.with_name('.' + output.name + '.lock').open('a') as guard:
         fcntl.flock(guard, fcntl.LOCK_EX | fcntl.LOCK_NB)
@@ -286,6 +291,9 @@ def grow_container(args, output):
             info = container_for(devices)
             if not before['fixture']:
                 require_runtime_space(info)
+                data = volume(info['ContainerReference'], uuid=before['volumes']['Data']['uuid'])
+                with mounted(data) as target:
+                    ensure_cryptex_view(target)
         with checked_container(disk) as layout:
             for key in ('container_uuid', 'volume_group_uuid', 'system_uuid', 'volumes'):
                 if layout[key] != before[key]:
@@ -367,6 +375,8 @@ def repair_metadata(args, output):
             volumes = {name: volume(container, uuid=before['volumes'][name]['uuid'])
                        for name in ('System', 'Data', 'Preboot')}
             restore_all_metadata(args, volumes['System'], volumes['Data'], volumes['Preboot'], stage)
+            with mounted(volumes['Data']) as target:
+                ensure_cryptex_view(target)
         with checked_container(disk) as layout:
             if any(layout[key] != before[key] for key in layout):
                 raise ValueError('Metadata repair changed the APFS volume identities')
