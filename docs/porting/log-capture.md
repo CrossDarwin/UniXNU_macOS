@@ -182,6 +182,31 @@ boot-ui-focus3=chronod to retain its stacks alongside backboardd and SpringBoard
 The arm64e sampler strips return-address PAC before validating and encoding
 frames. An empty stack section alone is not evidence that the processes stopped.
 
+### macOS memory journal
+
+The sheng desktop diagnostics job samples VM counters, swap usage and per-CPU
+ticks every 5 seconds. Process footprints, Safari paths and Data/VM capacity
+are recorded every 30 seconds. File-backed, inactive and purgeable page counts
+overlap; do not add them together as cached memory.
+
+Records are stored in `/var/log/sheng-desktop-diagnostics.log`, with three
+rotated files (`.1` through `.3`), up to 4 MiB each. Each record has a session ID,
+sequence number and CRC. The writer calls `fsync` after each sample and
+`F_FULLFSYNC` every 30 seconds. The following sample reports sync errors and I/O
+latency. A blocked read in the kernel mirror runs separately from the kernel
+log writer. With `desktop-log=1`, the mirror continues after ten minutes.
+
+After exporting the journal files, validate them on the build host:
+
+```sh
+python3 scripts/sheng-apfs/read-diagnostics.py /path/to/sheng-desktop-diagnostics.log*
+```
+
+The decoder reports damaged records, sequence gaps, sample delays and counter
+deltas. Interrupted records remain visible; intact records after them are still
+decoded. File-backed pages are a raw VM counter, not a reproduction of Activity
+Monitor's Cached Files calculation.
+
 ## 5. Complete one manual capture cycle {#manual-cycle}
 
 1. Build a test payload with logging enabled and rebuild the boot image.

@@ -423,6 +423,13 @@ def main():
             bins.mkdir(parents=True)
             jobs.mkdir()
             package = Path(request['device']) / 'package'
+            sampler = bins / 'DesktopDiagnostics'
+            sdk = subprocess.check_output(['xcrun', '--sdk', 'macosx', '--show-sdk-path'], text=True).strip()
+            run('xcrun', '--sdk', 'macosx', 'clang', '-target', 'arm64e-apple-macos27.0',
+                '-isysroot', sdk, '-O2', '-Wall', '-Wextra', '-Werror',
+                package / 'DesktopDiagnostics.c', '-o', sampler)
+            run('codesign', '--force', '--sign', '-', '--pagesize', '4096',
+                '--identifier', 'org.unixnu.desktop-diagnostics', sampler)
             shutil.copyfile(package / 'DesktopDiagnostics.sh', bins / 'DesktopDiagnostics.sh')
             shutil.copyfile(package / 'desktop-diagnostics.plist', jobs / 'org.unixnu.desktop-diagnostics.plist')
             candidate = work / 'desktop-addon.bin'
@@ -490,7 +497,8 @@ def main():
             addon = out / 'test-addon.bin'
             candidate.replace(addon)
         if trust is not None and (request.get('wifi_tool') or bluetooth_report is not None or appsync_report is not None
-                                  or absent_report is not None or request.get('native_apfs')):
+                                  or absent_report is not None or request.get('native_apfs')
+                                  or request.get('desktop_diagnostics')):
             # Keep every original module intact. Append only absent hashes;
             # rebuilding from a previously integrated addon stays idempotent.
             hashes = addon_hashes(addon, work / 'signed-addon', request.get('audio_system_plugins', ()),
@@ -529,7 +537,9 @@ def main():
                                                           gpu_addon=str(addon) if addon else None,
                                                           trust_cache=str(trust),
                                                           **({'native_apfs_grow': {'version': 1, 'log_reserve_bytes': 1 << 30}}
-                                                             if request.get('native_apfs') else {})), indent=2) + '\n')
+                                                             if request.get('native_apfs') else {}),
+                                                          **({'desktop_diagnostics': {'version': 2, 'interval_seconds': 5}}
+                                                             if request.get('desktop_diagnostics') else {})), indent=2) + '\n')
 
 
 if __name__ == '__main__':

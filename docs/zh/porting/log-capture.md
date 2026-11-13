@@ -136,6 +136,20 @@
 加入 boot-ui-focus3=chronod 可在 backboardd、SpringBoard 之外保留 chronod 的栈。
 arm64e 采样器先去除返回地址的 PAC，再检查和编码地址；栈区域为空本身不能证明进程停止运行。
 
+### macOS 内存记录
+
+sheng 桌面诊断任务每 5 秒记录 VM 计数、swap 和各核 CPU 计数，每 30 秒补充进程内存、Safari 路径及 Data/VM 容量。文件页、inactive 和 purgeable 计数存在重叠，不能相加作为缓存总量。
+
+记录保存在 `/var/log/sheng-desktop-diagnostics.log`，另保留 `.1` 至 `.3` 三份轮转文件，每份最多 4 MiB。每条记录包含会话 ID、序号和 CRC。每次采样后执行 `fsync`，每 30 秒执行 `F_FULLFSYNC`；下一条记录报告同步错误和写盘耗时。内核转存线程与内核日志写入线程分开运行。启用 `desktop-log=1` 后，转存不再于十分钟后停止。
+
+导出日志后，在构建主机校验：
+
+```sh
+python3 scripts/sheng-apfs/read-diagnostics.py /path/to/sheng-desktop-diagnostics.log*
+```
+
+解码器报告损坏记录、序号缺口、采样延迟和计数增量。中断写入后的完整记录仍可读取。文件页是原始 VM 计数，不等同于活动监视器的“已缓存文件”数值。
+
 ## 5. 手动完成一次抓取 {#manual-cycle}
 
 1. 启用日志参数，构建测试 payload 和启动镜像。
