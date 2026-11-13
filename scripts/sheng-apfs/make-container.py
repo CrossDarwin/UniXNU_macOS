@@ -17,6 +17,7 @@ from image import geometry, hash_image
 from layout import ensure_cryptex_view
 from metadata import check_file_flags, restore_metadata
 from xart import assign_role
+from audit import audit_apps
 
 
 def run(*args):
@@ -184,6 +185,16 @@ def populate(args, system, data, preboot, stage):
     restore_all_metadata(args, system, data, preboot, stage)
     with mounted(data) as target:
         ensure_cryptex_view(target)
+    audit = stage / 'application-namespace-v1.json'
+    if not audit.exists():
+        with ExitStack() as stack:
+            sources = {name: stack.enter_context(source_volume(getattr(args, name),
+                                                               getattr(args, name + '_uuid')))
+                       for name in ('system', 'system_os', 'app_os')}
+            report = audit_apps(stack.enter_context(mounted(system)),
+                                stack.enter_context(mounted(data)),
+                                stack.enter_context(mounted(preboot)), sources)
+        audit.write_text(json.dumps(report, indent=2) + '\n')
 
 
 def restore_all_metadata(args, system, data, preboot, stage):

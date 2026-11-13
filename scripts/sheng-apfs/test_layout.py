@@ -78,6 +78,34 @@ class CryptexLayoutTest(unittest.TestCase):
         self.assertEqual(shortcut.resolve(), app.resolve())
         self.assertTrue((shortcut / 'Contents/MacOS/Safari').is_file())
 
+    def test_registration_requires_the_launcher_namespace(self):
+        preboot = self.root / 'Preboot/Cryptexes/App/System/Applications/Safari.app'
+        (preboot / 'Contents/MacOS').mkdir(parents=True)
+        (preboot / 'Contents/Info.plist').write_text('fixture')
+        (preboot / 'Contents/MacOS/Safari').touch(mode=0o755)
+        app = self.data / 'Applications/Safari.app'
+        app.parent.mkdir()
+        log = self.root / 'registered'
+        tool = self.root / 'lsregister'
+        tool.write_text('#!/bin/bash\nprintf "%s\\n" "$@" > "' + str(log) + '"\n')
+        tool.chmod(0o755)
+        source = Path(__file__).with_name('safari.sh').read_text().split('\ncase ', 1)[0]
+        source = source.replace('cryptex=/System/Cryptexes/App/System/Applications/Safari.app',
+                                'cryptex=' + str(preboot))
+        source = source.replace('preboot=/System/Volumes/Preboot/Cryptexes/App/System/Applications/Safari.app',
+                                'preboot=' + str(preboot))
+        source = source.replace('applications=/Applications/Safari.app', 'applications=' + str(app))
+        source = source.replace('lsregister=/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister',
+                                'lsregister=' + str(tool))
+        script = self.root / 'register.sh'
+        script.write_text(source + '\nregister_safari\n')
+        result = subprocess.run(['bash', script], capture_output=True)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertFalse(log.exists())
+        app.symlink_to(preboot)
+        subprocess.run(['bash', script], check=True, capture_output=True)
+        self.assertEqual(log.read_text().splitlines(), ['-f', str(app)])
+
 
 if __name__ == '__main__':
     unittest.main()

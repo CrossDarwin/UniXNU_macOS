@@ -40,13 +40,9 @@ repair_view() {
 }
 
 register_safari() {
-    local app
-    for app in "$cryptex" "$preboot" "$applications"; do
-        if is_safari "$app" && "$lsregister" -f "$app"; then
-            return 0
-        fi
-    done
-    return 1
+    # Register the application entry users launch, after its full Cryptex path resolves.
+    is_safari "$cryptex" && is_safari "$preboot" && is_safari "$applications" &&
+        "$lsregister" -f "$applications"
 }
 
 case "${1:-}" in
