@@ -266,6 +266,8 @@ def grow_container(args, output):
         stage.mkdir(mode=0o700, exist_ok=True)
         inputs = {'baseline': str(baseline), 'receipt': before, 'bytes': size}
         checkpoint = stage / 'grow-inputs.json'
+        if not checkpoint.exists() and any(stage.iterdir()):
+            raise ValueError(f'Growth staging directory belongs to another operation: {stage}')
         if checkpoint.exists() and json.loads(checkpoint.read_text()) != inputs:
             raise ValueError(f'Growth inputs changed: {stage}')
         checkpoint.write_text(json.dumps(inputs, indent=2) + '\n')
