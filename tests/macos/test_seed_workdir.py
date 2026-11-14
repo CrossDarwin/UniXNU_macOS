@@ -60,7 +60,7 @@ class SeedWorkdirTest(unittest.TestCase):
             nonlocal raw
             if args[:2] == ('hdiutil', 'attach'):
                 raw = Path(args[-1])
-                return '/dev/disk99 Apple_APFS\n'
+                return plistlib.dumps({'system-entities': [{'dev-entry': '/dev/disk99'}]}).decode()
             self.assertEqual(args, ('diskutil', 'apfs', 'resizeContainer', 'disk100', '0'))
             if failure == 'resize':
                 raise subprocess.CalledProcessError(1, args)
