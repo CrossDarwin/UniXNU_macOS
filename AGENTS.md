@@ -1,5 +1,11 @@
 See docs/.
 
+## Push destination
+
+When the user requests a push, default to the corresponding CrossDarwin
+repository and verify the remote URL first. An explicit destination overrides
+this default. Upstream pull requests use a source branch in the CrossDarwin fork.
+
 ## Build and installation ownership
 
 The user runs production builds and all physical-device installation commands.
