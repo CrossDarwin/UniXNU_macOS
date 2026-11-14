@@ -6,11 +6,11 @@ on:
       device_repository:
         description: Device repository as owner/name
         required: true
-        default: UniXNU/UniXNU-sheng
+        default: CrossDarwin/UniXNU-sheng
       device_ref:
         description: Device repository ref
         required: true
-        default: main
+        default: b671b2aa42eb281ff0db4943238901705dc9ef56
       defconfig:
         description: Defconfig name (configs/ of the device repository)
         required: true

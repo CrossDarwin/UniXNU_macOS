@@ -11,7 +11,7 @@ import threading
 import zipfile
 from http.server import BaseHTTPRequestHandler, HTTPServer
 
-from unixnu import cli, feeds, ipsw, payload
+from unixnu import cli, components, feeds, ipsw, payload
 from unixnu.config import Context, parse_config
 from unixnu.util import Error
 
@@ -105,6 +105,14 @@ def main():
                'explicit new component survives format 2 selection')
         expect(('driver', 'Both') not in found and ('driver', 'DevOnly') not in found,
                'format 2 still filters unselected catalog and implicit modules')
+    metal = {'repository': 'https://github.com/CrossDarwin/AdrenoMetal.git',
+             'upstream_repository': 'https://github.com/UniXNU/AdrenoMetal.git',
+             'legacy_name': 'NativeMetal'}
+    for repository in ('CrossDarwin/AdrenoMetal', 'UniXNU/AdrenoMetal', 'UniXNU/NativeMetal'):
+        module = argparse.Namespace(source={'git': f'https://github.com/{repository}.git'})
+        expect(components.official_alias(None, module, metal), f'fork compatibility identity: {repository}')
+    module = argparse.Namespace(source={'git': 'https://github.com/other/NativeMetal.git'})
+    expect(not components.official_alias(None, module, metal), 'unrelated fork cannot claim compatibility aliases')
     expect(payload.check_args(['-v', 'a=1', 'b=x,y']) == '-v a=1 b=x,y', 'kernel arguments')
     with tempfile.TemporaryDirectory() as name:
         root = Path(name)

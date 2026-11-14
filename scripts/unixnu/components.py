@@ -86,10 +86,11 @@ def source_identity(ctx, module):
 
 def official_alias(ctx, module, spec):
     repository = repository_identity(spec.get('repository', ''))
-    if not repository.startswith('github.com/unixnu/'):
+    upstream = repository_identity(spec.get('upstream_repository', '')) or repository
+    if not upstream.startswith('github.com/unixnu/'):
         return False
     legacy = spec.get('legacy_name')
-    allowed = {repository}
+    allowed = {repository, upstream}
     if legacy:
         allowed.add('github.com/unixnu/' + legacy.lower())
     return source_identity(ctx, module) in allowed

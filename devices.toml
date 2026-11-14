@@ -2,15 +2,15 @@ schema_version = 2
 
 [[device]]
 name = "sheng"
-repository = "UniXNU/UniXNU-sheng"
+repository = "CrossDarwin/UniXNU-sheng"
 title = "Xiaomi Pad 6S Pro (sheng)"
 title_zh = "小米平板 6S Pro（sheng）"
 format = 2
 legacy_page = "preserve"
 soc = "SM8550"
 summary = "[Implementation and evidence by area](/devices/sheng)"
-repository_id = 1425469865
-revision = "3ad65c973caf8f64e5c5f7093c8ac73bf03b4064"
+repository_id = 1457518851
+revision = "b671b2aa42eb281ff0db4943238901705dc9ef56"
 board = "sheng"
 os_profile = "ipados-27.0.1-24A446"
 components = ["ArmDTPlatform", "ArmCpu", "XnuPrelink", "DarwinBoot", "ShengPreflight", "ShengUfs", "RamBlock", "GopFramebuffer", "AppleKeyStoreState", "Adreno740", "AdrenoMetal"]

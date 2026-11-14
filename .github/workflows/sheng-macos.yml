@@ -46,8 +46,8 @@ jobs:
           submodules: recursive
       - uses: actions/checkout@v4
         with:
-          repository: UniXNU/UniXNU-sheng
-          ref: cd73e23f0657c28a6638f165590d04f71ab76419
+          repository: CrossDarwin/UniXNU-sheng
+          ref: b671b2aa42eb281ff0db4943238901705dc9ef56
           path: device
       - name: Select device dependencies
         run: python3 scripts/ci/sheng_sources.py --device ../device
@@ -58,8 +58,8 @@ jobs:
           path: device/drivers/QcomDwc3
       - uses: actions/checkout@v4
         with:
-          repository: UniXNU/uefi-sheng
-          ref: 66421cb7bb5694843aec8de1ca3d1de4c20cca38
+          repository: CrossDarwin/uefi-sheng
+          ref: 3eb80395145f5c4478fc32f2d5bda56f0bc6878c
           path: uefi-sheng
 
       - name: Check host and package inputs
@@ -286,7 +286,7 @@ jobs:
             echo "sheng macOS test package: $RESULT"
             echo "Profile: $PROFILE"
             echo "Device: $(git -C ../device rev-parse HEAD)"
-            echo 'UEFI: 66421cb7bb5694843aec8de1ca3d1de4c20cca38'
+            echo 'UEFI: 3eb80395145f5c4478fc32f2d5bda56f0bc6878c'
             echo 'Hardware validation: pending; this workflow never flashes a device.'
             echo 'Download the seed and test package within one day.'
           } >> "$GITHUB_STEP_SUMMARY"

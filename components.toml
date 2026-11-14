@@ -100,11 +100,12 @@ legacy_outputs = { "build/native-adreno/libNativeAdreno.a" = "build/adreno740/li
 
 [[component]]
 id = "AdrenoMetal"
-repository_id = 1426849428
+repository_id = 1457518853
 kind = "driver"
 function = "Metal frontend through metal2vulkan and Turnip"
 scope = "graphics"
-repository = "https://github.com/UniXNU/AdrenoMetal.git"
+repository = "https://github.com/CrossDarwin/AdrenoMetal.git"
+upstream_repository = "https://github.com/UniXNU/AdrenoMetal.git"
 revision = "0de4c46ee105e8b4e071f2cbdfa195eb42e34bb4"
 path = "drivers/AdrenoMetal"
 hardware = ["Turnip Darwin backend", "kernel GPU user-client ABI"]
@@ -494,11 +495,12 @@ outputs = []
 
 [[component]]
 id = "QcaBluetooth"
-repository_id = 1447347374
+repository_id = 1457518855
 kind = "driver"
 function = "Qualcomm Bluetooth over GENI UART for Apple's native stack"
 scope = "controller"
-repository = "https://github.com/UniXNU/QcaBluetooth.git"
+repository = "https://github.com/CrossDarwin/QcaBluetooth.git"
+upstream_repository = "https://github.com/UniXNU/QcaBluetooth.git"
 revision = "9b8c652826f7b86b87ea1ceb4266708b70d27bf1"
 path = "drivers/QcaBluetooth"
 hardware = ["Qualcomm WCN7850 UART controller", "Qualcomm GENI UART"]
