@@ -145,7 +145,7 @@ sheng 桌面诊断任务每 5 秒记录 VM 计数、swap 和各核 CPU 计数，
 导出日志后，在构建主机校验：
 
 ```sh
-python3 scripts/sheng-apfs/read-diagnostics.py /path/to/sheng-desktop-diagnostics.log*
+python3 test_tool/sheng-apfs/read-diagnostics.py /path/to/sheng-desktop-diagnostics.log*
 ```
 
 解码器报告损坏记录、序号缺口、采样延迟和计数增量。中断写入后的完整记录仍可读取。文件页是原始 VM 计数，不等同于活动监视器的“已缓存文件”数值。

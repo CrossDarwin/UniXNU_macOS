@@ -58,7 +58,7 @@ Fastboot 验证需要 PATH 中有 `fastboot`，收到内核重启确认且 CDC �
 导入代码来自 `UniXNU-OnePlus-Ace5` 的 `694b39e`，并包含本地终端/投屏改动。电脑端验证：
 
 ```sh
-python -m unittest discover -s tests/terminal -v
+python -m unittest discover -s test_tool/terminal -v
 ```
 
 可选 C 发送端互操作测试需要设置 `GIULIA_SCREEN_FIXTURE`，指向设备仓库屏幕测试脚本生成的样本。默认测试使用合成数据包和模拟串口。硬件状态通过设备检查记录。
@@ -295,7 +295,7 @@ boot-ui-chrono=1
 地址使用 64 进制字母表编码，以适配行宽。把抄录的行交给解码器：
 
 ```sh
-python3 scripts/decode-boot-ui-trace.py trace.txt
+python3 test_tool/decode-boot-ui-trace.py trace.txt
 ```
 
 解码器为每个线程组输出一个 JSON 对象，包含 `pc`、`lr`、帧和错误码。
@@ -341,7 +341,7 @@ python3 package/Scripts/qemu-run.py out/esp \
 停止辅助脚本在指定符号处记录寄存器和内存：
 
 ```sh
-python3 scripts/qemu-entry/gdb-stop.py --help
+python3 test_tool/qemu-entry/gdb-stop.py --help
 ```
 
 ## 调试参数

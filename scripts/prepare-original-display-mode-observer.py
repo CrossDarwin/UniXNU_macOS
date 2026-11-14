@@ -10,7 +10,7 @@ import subprocess
 ROOT=Path(__file__).resolve().parents[1]
 parser=argparse.ArgumentParser(description=__doc__);parser.add_argument('--metal-device',action='store_true');args=parser.parse_args()
 address,length,digest,ret=(0x187ac8668,204,'8005e91f7637cf800246ae2130936f45cb57d6a0891a77c61f1f563e9b058d20',176) if args.metal_device else (0x19f3d0500,584,'ca4857e6617670f2369a0a6eb68be09e29135ce5dfda19ac1ea829229f0cc0ec',476)
-subprocess.run(['python3',ROOT/'scripts/audit-target-display-query.py'],check=True)
+subprocess.run(['python3',ROOT/'test_tool/audit-target-display-query.py'],check=True)
 plan=json.loads((ROOT/'build/display-analysis/query-plan.json').read_text())
 cache=ROOT/'.cache/firmware/target-volumes/systemos-mount/System/Library/Caches/com.apple.dyld'
 function=None

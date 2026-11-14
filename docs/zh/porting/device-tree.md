@@ -289,7 +289,7 @@ props = [
 
 | 生成器 | 用途 |
 | --- | --- |
-| `scripts/qemu-entry/make-dt.py` | 单 CPU、可选 GICv3、VirtIO 和 NVRAM 的 QEMU fixture |
+| `test_tool/qemu-entry/make-dt.py` | 单 CPU、可选 GICv3、VirtIO 和 NVRAM 的 QEMU fixture |
 | `scripts/make-adt.py` | 硬件 DTB 与 OS/板级配置到 ADT |
 | 格式 1 设备 `make-<device>-adt.py` | 设备专用生成器 |
 

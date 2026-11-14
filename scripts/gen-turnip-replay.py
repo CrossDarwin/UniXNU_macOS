@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Record Turnip's first submission (the plugin's fill) on the host simulation and embed it for a prefix replay on the tablet.
 
-The host plugin smoke (scripts/check-turnip-darwin-host.py builds it) runs the same Mesa source as the tablet's Turnip against the host
+The host plugin smoke (test_tool/check-turnip-darwin-host.py builds it) runs the same Mesa source as the tablet's Turnip against the host
 copy of the kernel stack, with FD_RD_DUMP writing every command-stream buffer. The first submission's buffers (GPU address, size, contents)
 and its single IB are written to build/turnip-smoke/TurnipReplay.h together with the dword offset after every TYPE7 packet, so the plugin
 can submit growing prefixes of the IB and report the first one the CP does not finish. Generated, never committed."""
@@ -21,7 +21,7 @@ HEADER = ROOT / 'build/turnip-smoke/TurnipReplay.h'
 RD_GPUADDR, RD_BUFFER_CONTENTS, RD_CMDSTREAM_ADDR = 3, 12, 6
 
 if not (HOST / 'plugin_smoke').exists():
-    subprocess.run([sys.executable, ROOT / 'scripts/check-turnip-darwin-host.py'], check=True)
+    subprocess.run([sys.executable, ROOT / 'test_tool/check-turnip-darwin-host.py'], check=True)
 shutil.rmtree(OUT, ignore_errors=True)
 OUT.mkdir(parents=True)
 env = dict(os.environ, DYLD_INSERT_LIBRARIES=str(HOST / 'libhostiokit.dylib'), MESA_LOG='', TU_DEBUG='nocb', FD_RD_DUMP='enable', HOSTSIM_PAGE_SIZE='4096',

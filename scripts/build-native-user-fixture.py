@@ -93,7 +93,7 @@ if args.probe_file:
     probe_flags += ['-DNATIVE_FILE_PROBE=1', f'-DNATIVE_PROBE_LIMIT={limit}',
                    f'-DNATIVE_PROBE_SIGNATURE_OFFSET={sigoff}', f'-DNATIVE_PROBE_SIGNATURE_SIZE={sigsize}']
 subprocess.run(['xcrun', 'clang', '-target', 'arm64-apple-ios17.0', '-isysroot', sdk,
-                *probe_flags, '-c', ROOT / 'scripts/qemu-entry/native-user.S', '-o', out / 'user.o'], check=True)
+                *probe_flags, '-c', ROOT / 'test_tool/qemu-entry/native-user.S', '-o', out / 'user.o'], check=True)
 subprocess.run(['xcrun', 'ld', '-arch', 'arm64', '-static', '-e', '_start',
                 '-platform_version', 'ios', '17.0', '17.0', out / 'user.o',
                 '-o', out / 'launchd-static.macho'], check=True)
@@ -241,7 +241,7 @@ if args.fp_context:
     trust=struct.pack('<4I',3,*starts)+b''.join(modules)
     (out/'offline-trust.bundle').write_bytes(trust)
     manifest=dict(own_program_sha256=hashlib.sha256(path.read_bytes()).hexdigest(),
-                  source_sha256=hashlib.sha256((ROOT/'scripts/qemu-entry/native-fp-context.inc').read_bytes()).hexdigest(),
+                  source_sha256=hashlib.sha256((ROOT/'test_tool/qemu-entry/native-fp-context.inc').read_bytes()).hexdigest(),
                   full_simd_registers=32,iterations=32,blocking_thread_switch=True,original_desktop=False)
     encoded=(json.dumps(manifest,indent=2)+'\n').encode();(out/'test-inputs.json').write_bytes(encoded)
     (out/'build-report.json').write_text(json.dumps(dict(process_sha256=manifest['own_program_sha256'],

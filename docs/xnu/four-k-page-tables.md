@@ -9,7 +9,7 @@ Apple ARM64 kernels use a 16 KiB page on most SoCs. Non-Apple ARM64 SoCs commonl
 | `BCM2837` | 12 | 4096 | 0, 4 KiB | 2, 4 KiB |
 | `VMAPPLE` | 14 | 16384 | 2, 16 KiB | 1, 16 KiB |
 
-`scripts/check-xnu-granules.py` compiles `TCR_EL1_BOOT` for both profiles and checks the TG0 and TG1 fields.
+`test_tool/check-xnu-granules.py` compiles `TCR_EL1_BOOT` for both profiles and checks the TG0 and TG1 fields.
 
 The kernel is compiled for 4 KiB. The page size is part of the machine configuration and the build flags. A 16 KiB kernel and a 4 KiB kernel are separate builds.
 
@@ -55,7 +55,7 @@ lsl x2, x2, #(ARM_PGSHIFT - TTE_SHIFT)
 #endif
 ```
 
-`scripts/check-native-4k-policy.py` extracts this policy from the patched source and executes it at RAM boundaries:
+`test_tool/check-native-4k-policy.py` extracts this policy from the patched source and executes it at RAM boundaries:
 
 | Profile | RAM | Kernel shift | User 32-bit shift |
 | --- | --- | --- | --- |
@@ -100,7 +100,7 @@ vm_size_t csb_native4k_hash_count;
 
 A page validation checks the index, the offset alignment and the table bounds. A miss returns `CS_VALIDATE_TAINTED`. A block that fails the original 16 KiB hash leaves the blob without a table.
 
-The build flag is `XNU_NATIVE_CS_HASH_CACHE`. `scripts/check-code-signing-granules.py` compiles the actual `cs_validate_codedirectory` gate and checks eight combinations of kernel shift, signature shift and cache mode.
+The build flag is `XNU_NATIVE_CS_HASH_CACHE`. `test_tool/check-code-signing-granules.py` compiles the actual `cs_validate_codedirectory` gate and checks eight combinations of kernel shift, signature shift and cache mode.
 
 ## Allocator alignment
 
@@ -161,12 +161,12 @@ A device driver maps DMA buffers through the SMMU with 4 KiB tables. The touch d
 
 | Check | Tool |
 | --- | --- |
-| Granule constants | `scripts/check-xnu-granules.py` |
-| Page size policy | `scripts/check-native-4k-policy.py` |
-| Code signing gate | `scripts/check-code-signing-granules.py` |
-| PGZ alignment | `scripts/check-pgz-alignment-checkpoints.py` |
-| UFS VA64 evidence | `scripts/check-ufs-va64-evidence.py` |
-| QEMU HVF observation | `scripts/qemu-entry/gdb-stop.py` with the native 4K fixture |
+| Granule constants | `test_tool/check-xnu-granules.py` |
+| Page size policy | `test_tool/check-native-4k-policy.py` |
+| Code signing gate | `test_tool/check-code-signing-granules.py` |
+| PGZ alignment | `test_tool/check-pgz-alignment-checkpoints.py` |
+| UFS VA64 evidence | `test_tool/check-ufs-va64-evidence.py` |
+| QEMU HVF observation | `test_tool/qemu-entry/gdb-stop.py` with the native 4K fixture |
 
 The QEMU observation records:
 

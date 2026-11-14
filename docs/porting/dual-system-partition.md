@@ -186,7 +186,7 @@ Do not format unreadable Data. Restoring GPT does not undo F2FS relocation. A fu
 Linux, WSL and macOS; a C compiler is required. No phone required:
 
 ```sh
-python3 scripts/dual_sys/test_dual_sys.py
+python3 test_tool/dual_sys/test_dual_sys.py
 cc -O2 -Wall -Wextra -Werror scripts/dual_sys/f2fs-shrink.c -o /tmp/f2fs-shrink-test
 /tmp/f2fs-shrink-test self-test
 sh -n scripts/dual_sys/twrp.sh

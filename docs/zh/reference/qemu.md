@@ -83,7 +83,7 @@ JOBS=8 bash package/Scripts/smoke.sh
 QEMU 入口生成器为内核构建 Apple 格式设备树：
 
 ```sh
-python3 scripts/qemu-entry/make-dt.py \
+python3 test_tool/qemu-entry/make-dt.py \
   --armvirt --armcpu --smp 2 \
   --owned-memory-size 0x20000000 \
   --output build/qemu-test.adt
@@ -112,7 +112,7 @@ python3 scripts/qemu-entry/make-dt.py \
 Apple Silicon macOS 上 QEMU 可以使用 HVF：
 
 ```sh
-python3 scripts/qemu-entry/make-dt.py --armvirt --armcpu --qemu-vmm-present \
+python3 test_tool/qemu-entry/make-dt.py --armvirt --armcpu --qemu-vmm-present \
   --qemu-accel hvf --output build/qemu-hvf.adt
 ```
 
@@ -121,7 +121,7 @@ python3 scripts/qemu-entry/make-dt.py --armvirt --armcpu --qemu-vmm-present \
 ## 停点
 
 ```sh
-python3 scripts/qemu-entry/gdb-stop.py --help
+python3 test_tool/qemu-entry/gdb-stop.py --help
 ```
 
 辅助脚本在符号处停住 QEMU，记录寄存器、内存和最后检查点，输出 JSON 报告。

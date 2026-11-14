@@ -46,7 +46,7 @@ Turnip 为每个渲染通道选择瓦片内存或系统内存，并发分箱默�
 ```sh
 python3 scripts/build-turnip-darwin.py --target ios27
 python3 scripts/build-adreno-metal-plugin.py --target ios27
-python3 scripts/check-native-metal-frontend-host.py
+python3 test_tool/check-native-metal-frontend-host.py
 ```
 
 正常构建应用记录在仓库中的翻译器、Turnip 补丁，并开启 Mesa 磁盘 shader cache。主机检查覆盖渲染像素、resolve、资源回收、swizzle、复制、回调、队列容量及优先级汇总。上机验证项目是并发客户端下的帧间隔和抢占行为。
@@ -63,4 +63,4 @@ python3 scripts/check-native-metal-frontend-host.py
 
 Darwin BO 映射失败时先解除 CPU 映射，再释放内核租约。VM 资源不足时，
 回收已完成的缓存 BO 后重试一次。回收失败会保留原生资源并标记设备丢失。
-运行 `python3 scripts/check-turnip-cpu-map-host.py` 可执行主机故障注入检查。
+运行 `python3 test_tool/check-turnip-cpu-map-host.py` 可执行主机故障注入检查。

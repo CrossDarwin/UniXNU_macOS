@@ -295,7 +295,7 @@ props = [
 
 | Generator | Purpose |
 | --- | --- |
-| `scripts/qemu-entry/make-dt.py` | QEMU fixture with a single CPU and optional GICv3, VirtIO and NVRAM |
+| `test_tool/qemu-entry/make-dt.py` | QEMU fixture with a single CPU and optional GICv3, VirtIO and NVRAM |
 | `scripts/make-adt.py` | Hardware DTB and OS/board profiles to ADT |
 | Format 1 device `make-<device>-adt.py` | Device-specific generator |
 

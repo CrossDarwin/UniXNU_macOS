@@ -50,7 +50,7 @@ if not plan_path.exists() and recorded.exists():
     plan_path.parent.mkdir(parents=True, exist_ok=True)
     plan_path.write_bytes(recorded.read_bytes())
 if not plan_path.exists():
-    print(run(['python3', ROOT / 'scripts/audit-target-accelerator-base.py'], text=True), end='')
+    print(run(['python3', ROOT / 'test_tool/audit-target-accelerator-base.py'], text=True), end='')
 plan = json.loads(plan_path.read_text())
 # IOService has 168 vtable entries in the iOS-target kernel and 272 in the macOS-target one (padded kext vtables).
 SERVICE_ENTRIES = 272 if BUILD == '26C5035r' else 168

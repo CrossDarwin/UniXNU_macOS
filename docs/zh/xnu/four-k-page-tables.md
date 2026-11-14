@@ -9,7 +9,7 @@ Apple ARM64 内核在多数 SoC 上使用 16 KiB 页。非 Apple ARM64 SoC 常�
 | `BCM2837` | 12 | 4096 | 0，4 KiB | 2，4 KiB |
 | `VMAPPLE` | 14 | 16384 | 2，16 KiB | 1，16 KiB |
 
-`scripts/check-xnu-granules.py` 为两个 profile 编译 `TCR_EL1_BOOT` 并检查 TG0 和 TG1 字段。
+`test_tool/check-xnu-granules.py` 为两个 profile 编译 `TCR_EL1_BOOT` 并检查 TG0 和 TG1 字段。
 
 内核按 4 KiB 编译。页大小属于机型配置和构建参数，16 KiB 内核和 4 KiB 内核是两次独立构建。
 
@@ -55,7 +55,7 @@ lsl x2, x2, #(ARM_PGSHIFT - TTE_SHIFT)
 #endif
 ```
 
-`scripts/check-native-4k-policy.py` 从打补丁后的源码提取策略，并在 RAM 边界执行：
+`test_tool/check-native-4k-policy.py` 从打补丁后的源码提取策略，并在 RAM 边界执行：
 
 | Profile | RAM | 内核 shift | 用户 32 位 shift |
 | --- | --- | --- | --- |
@@ -100,7 +100,7 @@ vm_size_t csb_native4k_hash_count;
 
 页校验检查索引、偏移对齐和表边界。未命中返回 `CS_VALIDATE_TAINTED`。原始 16 KiB 哈希失败的块不会产生表。
 
-构建开关为 `XNU_NATIVE_CS_HASH_CACHE`。`scripts/check-code-signing-granules.py` 编译实际的 `cs_validate_codedirectory` gate，并检查内核 shift、签名 shift 和 cache 模式的八种组合。
+构建开关为 `XNU_NATIVE_CS_HASH_CACHE`。`test_tool/check-code-signing-granules.py` 编译实际的 `cs_validate_codedirectory` gate，并检查内核 shift、签名 shift 和 cache 模式的八种组合。
 
 ## 分配器对齐
 
@@ -161,12 +161,12 @@ flush_dcache((vm_offset_t)ptoa(pp), PAGE_SIZE, TRUE);
 
 | 检查 | 工具 |
 | --- | --- |
-| granule 常量 | `scripts/check-xnu-granules.py` |
-| 页大小策略 | `scripts/check-native-4k-policy.py` |
-| 代码签名 gate | `scripts/check-code-signing-granules.py` |
-| PGZ 对齐 | `scripts/check-pgz-alignment-checkpoints.py` |
-| UFS VA64 证据 | `scripts/check-ufs-va64-evidence.py` |
-| QEMU HVF 观察 | `scripts/qemu-entry/gdb-stop.py` 与 native 4K fixture |
+| granule 常量 | `test_tool/check-xnu-granules.py` |
+| 页大小策略 | `test_tool/check-native-4k-policy.py` |
+| 代码签名 gate | `test_tool/check-code-signing-granules.py` |
+| PGZ 对齐 | `test_tool/check-pgz-alignment-checkpoints.py` |
+| UFS VA64 证据 | `test_tool/check-ufs-va64-evidence.py` |
+| QEMU HVF 观察 | `test_tool/qemu-entry/gdb-stop.py` 与 native 4K fixture |
 
 QEMU 观察记录：
 

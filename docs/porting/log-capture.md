@@ -199,7 +199,7 @@ log writer. With `desktop-log=1`, the mirror continues after ten minutes.
 After exporting the journal files, validate them on the build host:
 
 ```sh
-python3 scripts/sheng-apfs/read-diagnostics.py /path/to/sheng-desktop-diagnostics.log*
+python3 test_tool/sheng-apfs/read-diagnostics.py /path/to/sheng-desktop-diagnostics.log*
 ```
 
 The decoder reports damaged records, sequence gaps, sample delays and counter

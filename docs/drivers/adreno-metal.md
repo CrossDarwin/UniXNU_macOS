@@ -44,7 +44,7 @@ From the resolved iOS 27 target tree:
 ```sh
 python3 scripts/build-turnip-darwin.py --target ios27
 python3 scripts/build-adreno-metal-plugin.py --target ios27
-python3 scripts/check-native-metal-frontend-host.py
+python3 test_tool/check-native-metal-frontend-host.py
 ```
 
 The normal build applies the recorded translator and Turnip patches and enables Mesa's disk shader cache. Host checks cover rendered pixels, resolves, resource aliasing, swizzles, copies, callbacks, queue limits and priority aggregation. Hardware qualification covers frame pacing and preemption under concurrent clients.
@@ -64,4 +64,4 @@ With `diag=1`, encoding batch end records (type 14, phase 3) store encoding-thre
 Darwin BO mapping releases invalid CPU views before their kernel leases. On
 VM resource exhaustion it frees completed cached BOs and retries once. A failed
 rollback retains its native resources and marks the device lost. Run
-`python3 scripts/check-turnip-cpu-map-host.py` for the host fault-injection check.
+`python3 test_tool/check-turnip-cpu-map-host.py` for the host fault-injection check.

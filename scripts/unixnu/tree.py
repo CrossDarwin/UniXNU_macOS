@@ -1,6 +1,6 @@
 """Assemble the build tree from the resolved modules.
 
-out/<device>/tree/ has the layout of this repository (drivers/ kits/ patches/ scripts/ package/)
+out/<device>/tree/ has the layout of this repository (drivers/ kits/ patches/ scripts/ test_tool/ package/)
 plus refer/, build/ and .cache/ for the scripts that expect them. Modules are symbolic links to
 their sources, so edits to a local module take effect on the next build; scripts are copied, since
 they locate the tree from their own real path. The device package appears as kits/<kit>.
@@ -90,6 +90,8 @@ def assemble(ctx, modules):
     for base in bases:
         if (base / 'scripts').is_dir():
             _copy_scripts(base / 'scripts', tree / 'scripts')
+        if (base / 'test_tool').is_dir():
+            _copy_scripts(base / 'test_tool', tree / 'test_tool')
     compatibility = ctx.root / 'scripts/compatibility.toml'
     if compatibility.is_file():
         for alias, canonical in load_toml(compatibility).get('scripts', {}).items():

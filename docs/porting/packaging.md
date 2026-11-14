@@ -148,7 +148,7 @@ A payload-only build refuses a different Data UUID and asks for a kernel rebuild
 
 The kernel addon writer sets the replacement file size and mode explicitly.
 Shorter updates remove old tails; identical files skip writes.
-`python3 scripts/check-addon-writer.py` checks this path with simulated VFS
+`python3 test_tool/check-addon-writer.py` checks this path with simulated VFS
 operations and ASan/UBSan.
 
 For a **first installation**, `scripts/package.sh --os 27 --init-data` creates an

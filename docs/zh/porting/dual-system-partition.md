@@ -186,7 +186,7 @@ Data 无法读取时不要格式化。恢复 GPT 不能撤销 F2FS 数据迁移�
 Linux、WSL 和 macOS 均可执行，需要 C 编译器，无需连接手机：
 
 ```sh
-python3 scripts/dual_sys/test_dual_sys.py
+python3 test_tool/dual_sys/test_dual_sys.py
 cc -O2 -Wall -Wextra -Werror scripts/dual_sys/f2fs-shrink.c -o /tmp/f2fs-shrink-test
 /tmp/f2fs-shrink-test self-test
 sh -n scripts/dual_sys/twrp.sh

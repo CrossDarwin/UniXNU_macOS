@@ -83,7 +83,7 @@ Logs and screenshots go to `package/Build/Smoke/`.
 The QEMU entry generator builds an Apple-format device tree for the kernel:
 
 ```sh
-python3 scripts/qemu-entry/make-dt.py \
+python3 test_tool/qemu-entry/make-dt.py \
   --armvirt --armcpu --smp 2 \
   --owned-memory-size 0x20000000 \
   --output build/qemu-test.adt
@@ -113,7 +113,7 @@ Also pass `smp=1` in the XNU entry's boot arguments to start secondary CPUs.
 On Apple Silicon macOS, QEMU can use HVF:
 
 ```sh
-python3 scripts/qemu-entry/make-dt.py --armvirt --armcpu --qemu-vmm-present \
+python3 test_tool/qemu-entry/make-dt.py --armvirt --armcpu --qemu-vmm-present \
   --qemu-accel hvf --output build/qemu-hvf.adt
 ```
 
@@ -122,7 +122,7 @@ The generator reads the host counter frequency for the CPU timebase. The bound f
 ## Stop point
 
 ```sh
-python3 scripts/qemu-entry/gdb-stop.py --help
+python3 test_tool/qemu-entry/gdb-stop.py --help
 ```
 
 The helper stops QEMU at a symbol and records registers, memory and the last checkpoint. The output is a JSON report.

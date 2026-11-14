@@ -123,7 +123,7 @@ GPU 和音频更新放在 addon 中，不修改 seed。构建会检查 APFS 卷 
 与内核配置不同则报错，要求重新编译内核。
 
 内核插件写入器显式设置替换后的文件长度与权限，较短的更新会截掉旧尾巴，内容
-相同的文件跳过写入。`python3 scripts/check-addon-writer.py` 使用 VFS 模拟及
+相同的文件跳过写入。`python3 test_tool/check-addon-writer.py` 使用 VFS 模拟及
 ASan/UBSan 检查该路径。
 
 **首次安装**可用 `scripts/package.sh --os 27 --init-data`，从 IPSW 的初始

@@ -71,12 +71,12 @@ pages from swap. The next user fault or syscall clears the grant. Read
 `vm.swapin_iotier_boost` and `vm.swapin_iotier_grants` for its state and counter;
 `vm-swapin-io=0` disables the policy for comparison.
 
-The disposable QEMU workload uses `test-memory-runtime.sh` and
-`test-memory-reclaim.c`. It inherits its scheduling policy unless explicitly
+The disposable QEMU workload uses `test_tool/sheng-apfs/test-memory-runtime.sh` and
+`test_tool/sheng-apfs/test-memory-reclaim.c`. It inherits its scheduling policy unless explicitly
 given `--foreground`. Qualify its journal after readback:
 
 ```sh
-python3 scripts/sheng-apfs/verify-memory-test.py --require-io-boost /path/to/reclaim.log
+python3 test_tool/sheng-apfs/verify-memory-test.py --require-io-boost /path/to/reclaim.log
 ```
 
 PASS requires compression, decompression, swap writes and swap reads, a complete
@@ -249,7 +249,7 @@ Installing it replaces the existing `userdata` layout.
 Run the disposable image test inside a macOS QEMU VM with at least 6 GiB free:
 
 ```sh
-python3 scripts/sheng-apfs/test-grow-macos.py /path/to/new-test-directory
+python3 test_tool/sheng-apfs/test-grow-macos.py /path/to/new-test-directory
 ```
 
 The test grows a 4 GiB container to 8 GiB, checks retry and repeated-start behavior,

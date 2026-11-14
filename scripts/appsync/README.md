@@ -105,9 +105,9 @@ build inputs. `appsync-service.json` records `scope = "all-user-bundles"`,
 From UniXNU on macOS with Xcode and Python 3.13 or later:
 
 ```sh
-python3.13 scripts/appsync/test.py --signing --os-root /readonly/24A446/OS \
+python3.13 test_tool/appsync/test.py --signing --os-root /readonly/24A446/OS \
   --os-image /path/to/24A446/OS.dmg
-python3.13 scripts/test-runtime-inputs.py
+python3.13 test_tool/test-runtime-inputs.py
 ```
 
 The host suite runs production hooks and repair code under ASan/UBSan. It

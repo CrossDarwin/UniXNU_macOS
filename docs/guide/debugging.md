@@ -59,7 +59,7 @@ Basic kernels may only support `help`, `ping`, `status` and `replay`; extended q
 The imported code originates from `UniXNU-OnePlus-Ace5` at `694b39e` plus local terminal/screen changes. Host verification:
 
 ```sh
-python -m unittest discover -s tests/terminal -v
+python -m unittest discover -s test_tool/terminal -v
 ```
 
 The optional C-sender interoperability test needs `GIULIA_SCREEN_FIXTURE` pointing to the output of the device repository's screen test runner. Default tests use synthetic packets and mocked serial sessions; they do not establish hardware readiness.
@@ -296,7 +296,7 @@ boot-ui-chrono=1
 The address tokens use a radix-64 alphabet to fit in the row width. Feed the transcribed rows to the decoder:
 
 ```sh
-python3 scripts/decode-boot-ui-trace.py trace.txt
+python3 test_tool/decode-boot-ui-trace.py trace.txt
 ```
 
 The decoder prints one JSON object per thread group with `pc`, `lr`, frames and error codes.
@@ -342,7 +342,7 @@ The runner writes the ANSI-stripped log to `out/qemu.clean.log`. `--screenshot` 
 The stop helper records registers and memory at a symbol:
 
 ```sh
-python3 scripts/qemu-entry/gdb-stop.py --help
+python3 test_tool/qemu-entry/gdb-stop.py --help
 ```
 
 ## Debug arguments

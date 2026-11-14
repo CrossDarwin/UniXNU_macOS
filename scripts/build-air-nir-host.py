@@ -163,14 +163,14 @@ for library, index, size, channel_count, compiled in fixtures:
     results.append(result)
     print(f'PASS: {library} {index}: {count} original-IR/NIR cases; ' + ('A740 code + roundtrip' if compiled else 'strong-FMA export refused'), flush=True)
 
-run([sys.executable, ROOT/'scripts/check-air-resource-inputs.py', '--compiler', exe,
+run([sys.executable, ROOT/'test_tool/check-air-resource-inputs.py', '--compiler', exe,
      '--llvm-bindir', llvm_bin], timeout=60)
 resource_report=json.loads((OUT/'resources/report.json').read_text())
 
-run([sys.executable, ROOT/'scripts/check-air-fragment-outputs.py', '--compiler', exe,
+run([sys.executable, ROOT/'test_tool/check-air-fragment-outputs.py', '--compiler', exe,
      '--llvm-bindir', llvm_bin], timeout=30)
 fragment_report=json.loads((OUT/'fragments/report.json').read_text())
-run([sys.executable, ROOT/'scripts/check-air-fragment-inputs.py', '--compiler', exe,
+run([sys.executable, ROOT/'test_tool/check-air-fragment-inputs.py', '--compiler', exe,
      '--llvm-bindir', llvm_bin], timeout=60)
 fragment_input_report=json.loads((OUT/'fragment-inputs/report.json').read_text())
 
@@ -255,7 +255,7 @@ coefficient_report = json.loads((OUT / 'coefficients/report.json').read_text())
 run([sys.executable, KIT / 'tests/check_math_flags.py', '--compiler', exe,
      '--llvm-bindir', llvm_bin, '--out', OUT / 'math-flags', '--chip', CHIP], timeout=30)
 math_flags_report = json.loads((OUT / 'math-flags/report.json').read_text())
-run([sys.executable, ROOT/'scripts/check-adreno-constant-uploads.py', '--compiler', exe], timeout=60)
+run([sys.executable, ROOT/'test_tool/check-adreno-constant-uploads.py', '--compiler', exe], timeout=60)
 constant_upload_report=json.loads((OUT/'constant-uploads/report.json').read_text())
 compiled_hashes={(r['library'],r['index']):r['binary_sha256'] for r in results+resource_report['originals']}
 packed_hashes={(r['library'],r['index']):r['binary_sha256'] for r in constant_upload_report['original_layouts']}
