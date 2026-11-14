@@ -6,6 +6,10 @@
 
 按[驱动接入步骤](/zh/porting/drivers#build-integration)连接构建配方，再执行本页的检查。
 
+sheng 上的 macOS 27.3 通过 H4 串口设备 `/dev/cu.BLTH` 接入控制器。
+第三方控制器的事件掩码启用 LE Extended Advertising Report，用于标准扩展扫描。
+在实机上验证设备发现和配对。
+
 ## 源码与接口 {#source-map}
 
 | 实现部分 | 源码 | 阅读与实现内容 |

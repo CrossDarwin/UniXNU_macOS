@@ -9,6 +9,10 @@ profiles.
 Use [driver build integration](/porting/drivers#build-integration) to connect the
 recipe, then run this page's checks.
 
+On sheng with macOS 27.3, the adapter uses the H4 serial device `/dev/cu.BLTH`.
+The third-party controller event mask enables LE Extended Advertising Report
+for standard extended scans. Validate discovery and pairing on the device.
+
 ## Sources and interfaces {#source-map}
 
 | Implementation | Source | What to read and implement |
