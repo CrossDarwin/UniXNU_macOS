@@ -19,6 +19,11 @@ def container_receipt(path):
         size = data['bytes']
         if not isinstance(size, int) or size < 4 * 2**30 or size % 4096:
             raise ValueError('Expected a 4 KiB aligned container of at least 4 GiB')
+        if data.get('growth') == 'offline':
+            partition = data.get('partition_bytes')
+            if (type(partition) is not int or partition % 4096 or partition > (1 << 63) - 1 or
+                    partition != size + (1 << 30)):
+                raise ValueError('Offline container must end at the userdata log boundary')
         if not re.fullmatch(r'[0-9a-f]{64}', data['sha256']):
             raise ValueError('Expected the SHA-256 of the checked container')
         for key in ('container_uuid', 'volume_group_uuid', 'system_uuid'):

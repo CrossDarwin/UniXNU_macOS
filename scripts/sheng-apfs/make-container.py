@@ -3,6 +3,7 @@
 
 import argparse
 import fcntl
+import hashlib
 import json
 import os
 import plistlib
@@ -269,11 +270,12 @@ def grow_container(args, output):
     baseline = args.grow_container.resolve()
     before = json.loads((baseline / 'container.json').read_text())
     source = baseline / 'container.apfs'
-    size = args.size_gib * 2**30
+    size_bytes = getattr(args, 'size_bytes', None)
+    size = size_bytes if size_bytes is not None else args.size_gib * 2**30
     if before['format'] != 'sheng-apfs-v1' or source.stat().st_size != before['bytes']:
         raise ValueError('Baseline image and receipt do not agree')
-    if size <= before['bytes']:
-        raise ValueError('The new container must be larger than the baseline')
+    if size < before['bytes']:
+        raise ValueError('The new container cannot be smaller than the baseline')
     if not before['fixture'] and os.geteuid() != 0:
         raise ValueError('Run populated container growth as root to preserve Data ownership')
     stage = output.with_name('.' + output.name + '.incomplete')
@@ -289,6 +291,8 @@ def grow_container(args, output):
         checkpoint.write_text(json.dumps(inputs, indent=2) + '\n')
         disk = stage / 'container.apfs'
         if not disk.exists():
+            if image_hash(source) != before['sha256']:
+                raise ValueError('Baseline content does not match its checked receipt')
             run('/bin/cp', '-c', source, disk)
             disk.chmod(0o600)
         if disk.stat().st_size not in (before['bytes'], size):
@@ -313,7 +317,10 @@ def grow_container(args, output):
                 raise ValueError('Container did not grow to the requested size')
             digest = image_hash(disk)
         (stage / 'container.json').write_text(json.dumps(
-            {**before, **layout, 'sha256': digest}, indent=2) + '\n')
+            {**before, **layout, 'sha256': digest, 'growth': 'offline',
+             'partition_bytes': size + (1 << 30),
+             'baseline_receipt_sha256': hashlib.sha256(
+                 (baseline / 'container.json').read_bytes()).hexdigest()}, indent=2) + '\n')
         checkpoint.unlink()
         if os.environ.get('SUDO_UID') and os.environ.get('SUDO_GID'):
             for path in (disk, stage / 'container.json', stage):
@@ -491,7 +498,9 @@ def make_container(args, output):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('output', type=Path, help='Container directory')
-    parser.add_argument('--size-gib', type=int)
+    sizes = parser.add_mutually_exclusive_group()
+    sizes.add_argument('--size-gib', type=int)
+    sizes.add_argument('--size-bytes', type=int, help='Exact offline growth capacity, aligned to 4096 bytes')
     parser.add_argument('--grow-container', metavar='BASELINE_DIRECTORY', type=Path,
                         help='Clone and grow a container while preserving its volumes and Data')
     parser.add_argument('--verify-xart', metavar='BASELINE_JSON', type=Path,
@@ -506,6 +515,10 @@ def main():
         parser.add_argument(f'--{name}', type=Path, help='Prepared, decrypted APFS image')
         parser.add_argument(f'--{name}-uuid', help='Required when the input has multiple APFS volumes')
     args = parser.parse_args()
+    if args.size_bytes is not None and (
+            not args.grow_container or args.size_bytes < 4 * 2**30 or
+            args.size_bytes % 4096 or args.size_bytes > (1 << 63) - 1 - (1 << 30)):
+        parser.error('--size-bytes requires offline growth and a bounded 4 KiB aligned capacity of at least 4 GiB')
     images = (args.system, args.system_os, args.app_os)
     if sys.platform != 'darwin':
         parser.error('APFS volume creation needs macOS')
@@ -520,9 +533,10 @@ def main():
             sys.exit(f'xART verification failed: {error}')
         return
     if args.grow_container:
-        if (args.size_gib is None or args.size_gib <= 0 or args.fixture or any(images)
+        if ((args.size_gib is None and args.size_bytes is None) or
+                (args.size_gib is not None and args.size_gib <= 0) or args.fixture or any(images)
                 or args.repair_metadata or args.without_xart):
-            parser.error('--grow-container requires a baseline, --size-gib and a new output directory')
+            parser.error('--grow-container requires a baseline, --size-gib or --size-bytes and a new output directory')
         if output.exists() or output.is_symlink() or not output.parent.is_dir():
             parser.error('Use a new output directory under an existing parent')
         try:

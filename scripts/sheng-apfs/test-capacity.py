@@ -6,6 +6,7 @@ import tempfile
 import json
 from types import SimpleNamespace
 from pathlib import Path
+from capacity import usable_bytes
 
 spec = importlib.util.spec_from_file_location('container', Path(__file__).with_name('make-container.py'))
 container = importlib.util.module_from_spec(spec)
@@ -13,6 +14,13 @@ spec.loader.exec_module(container)
 
 
 class CapacityTest(unittest.TestCase):
+    def test_offline_boundary_preserves_exact_tail(self):
+        for partition in (16 * 2**30, 48 * 2**30 + 4096, 249497890816):
+            self.assertEqual(usable_bytes(partition) + 2**30, partition)
+        for partition in (True, -1, 4 * 2**30, 48 * 2**30 + 1, 1 << 64):
+            with self.assertRaises(ValueError):
+                usable_bytes(partition)
+
     def test_full_device_container_is_rejected(self):
         with self.assertRaisesRegex(ValueError, 'first boot and swap'):
             container.require_runtime_space({'CapacityCeiling': 34359738368,

@@ -22,17 +22,15 @@ filesystem. Enter the administrator password at the APFS creation step if
 sudo prompts for it. Use `--ipsw PATH_OR_URL` to provide the pinned IPSW
 yourself or `--rsync PATH` to select rsync 3.
 
-New images start with a 48 GiB APFS container. On first boot, the native driver
-exposes the actual userdata capacity minus a fixed 1 GiB diagnostic reserve.
-The root service grows the container to that boundary. System, Data and VM then
-share the expanded space without per-volume quotas. A larger device uses the
-same initial image; `--size-gib` sets the initial capacity, not the final limit.
+Images are prepared in one writable APFS container. System, Data, VM, Preboot,
+Hardware and xART share its capacity. The builder starts with 48 GiB, then uses
+Apple `diskutil` to expand it offline to userdata minus the final 1 GiB reserved
+for diagnostics. The boot runtime does not include a resize daemon.
 
-Each boot checks the actual container and volume UUIDs before resizing. A
-completed expansion is skipped. A failed attempt preserves the data and records
-the error for the next boot. Read `/var/log/unixnu-apfs-grow.log` and
-`/var/db/unixnu/apfs-grow.json` for the initial, target and actual capacities.
-The service does not format the disk or shrink a container.
+The target userdata capacity comes from the device GPT configuration.
+`--userdata-bytes BYTES` selects an exact alternative; verify it against the
+device before flashing. `--size-gib` sets the preparation size. The final image
+has the target capacity and remains sparse on the host.
 
 Use `--user rinnrei --display-name RinnRei --auto-login` to provision a local
 administrator and skip Setup Assistant. Enter the account password at the
@@ -84,6 +82,10 @@ python3 scripts/sheng-apfs/verify-memory-test.py --require-io-boost /path/to/rec
 PASS requires compression, decompression, swap writes and swap reads, a complete
 data check, and kernel I/O grants with unchanged workload priority.
 
+After copying, application checks resolve firmlinks and Cryptex shortcuts,
+compare application, framework, XPC and plugin resources with the restore images,
+and check executable paths. Files omitted by Apple are recorded separately from
+packaging errors.
 The Data Cryptex view preserves the original Safari shortcut. Native APFS boot
 repairs missing view paths and registers Safari in the Aqua session. Read
 `/var/log/unixnu-safari-repair.log` and
@@ -139,8 +141,7 @@ sudo python3 scripts/sheng-apfs/make-container.py \
 ## Grow an existing container
 
 A populated image needs at least 8 GiB of free APFS space for first boot and
-swap. New builds start at 48 GiB and expand on the device. Reusing an image keeps
-its size on the build host. To expand a local image while preserving its accounts,
+swap. The complete builder expands images offline before packaging. To expand a local image while preserving its accounts,
 files and volume UUIDs, grow an APFS clone on the macOS build host:
 
 ```sh

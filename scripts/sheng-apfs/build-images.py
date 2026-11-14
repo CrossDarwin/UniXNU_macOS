@@ -3,6 +3,7 @@
 
 import argparse
 import fcntl
+import gzip
 import hashlib
 import json
 import os
@@ -12,16 +13,18 @@ import struct
 import subprocess
 import sys
 import tempfile
+import zlib
 
 HERE = Path(__file__).resolve().parent
 ROOT = HERE.parents[1]
 sys.path.insert(0, str(HERE.parent))
 
-from unixnu import cli
+from unixnu import cli, firmware, payload as boot_payload
 from unixnu.apfs_root import container_receipt
 from unixnu.config import Context
 from unixnu.ipsw import Ipsw
 from unixnu.util import Error, sha256_file
+from capacity import usable_bytes
 
 BOOT_LIMIT = 192 * 2**20
 RESTORE_IMAGES = (('system', 'OS', 'os_volume_uuid'),
@@ -44,6 +47,10 @@ def unixnu(*args):
 
 def build_container(args, ctx, source, directory):
     if directory.exists():
+        receipt, _ = container_receipt(directory / 'container.json')
+        target = usable_bytes(args.userdata_bytes)
+        if receipt['bytes'] > target:
+            raise Error('Existing container exceeds the selected userdata capacity')
         print(f'Reusing APFS container - {directory}', flush=True)
         return
     if args.container:
@@ -56,6 +63,26 @@ def build_container(args, ctx, source, directory):
     print('APFS creation needs administrator privileges. Respond to the sudo prompt if shown.', flush=True)
     python(HERE / 'make-container.py', '--size-gib', str(args.size_gib), '--profile',
            ctx.work.parent.name, *rsync, *images, directory, privileged=True)
+
+
+def expand_container(args, source, work):
+    target = usable_bytes(args.userdata_bytes)
+    before, fingerprint = container_receipt(source / 'container.json')
+    if before.get('growth') == 'offline' and before.get('partition_bytes') == args.userdata_bytes:
+        if before['bytes'] != target:
+            raise Error('Offline container does not reach the selected boundary')
+        return source
+    destination = work / 'container-offline'
+    if destination.exists():
+        receipt, _ = container_receipt(destination / 'container.json')
+        if (receipt.get('growth') != 'offline' or receipt['bytes'] != target or
+                receipt.get('partition_bytes') != args.userdata_bytes or
+                receipt.get('baseline_receipt_sha256') != fingerprint):
+            raise Error('Preserved offline image differs from the selected inputs or device capacity')
+    else:
+        python(HERE / 'make-container.py', '--grow-container', source,
+               '--size-bytes', str(target), destination, privileged=True)
+    return destination
 
 
 def prepare_runtime(ctx, source, directory, modules):
@@ -76,7 +103,7 @@ def prepare_runtime(ctx, source, directory, modules):
         python(board / 'drivers/QcomIris/tools/fetch-sources.py')
     directory.mkdir(parents=True, exist_ok=True)
     request = dict(spec, tree=str(ctx.tree), device=str(board), output=str(directory),
-                   native_apfs=True, init_data=False, boot_shims=False, gpu_addon=None,
+                   native_apfs=True, native_apfs_offline=True, init_data=False, boot_shims=False, gpu_addon=None,
                    gpu_addon_enabled=spec.get('gpu_addon', True), trust_cache=None,
                    os_image=str(source.disk_image('OS')),
                    trust_modules=[str(source.extract(name)) for name in spec['trust_components']])
@@ -87,7 +114,7 @@ def prepare_runtime(ctx, source, directory, modules):
     python(ctx.tree / spec['tool'], '--request', path)
 
 
-def template_boot(template, payload, output):
+def template_boot(template, payload, output, replacement_fd=None):
     transport = (template / 'boot.img').read_bytes()
     receipt = json.loads((template / 'boot.json').read_text())
     if (len(transport) < 4096 or transport[:8] != b'ANDROID!'
@@ -102,8 +129,26 @@ def template_boot(template, payload, output):
     kernel_sha = hashlib.sha256(kernel).hexdigest()
     if kernel_sha != receipt['transport_kernel_sha256']:
         raise ValueError('Boot template transport does not match its receipt')
+    if replacement_fd is not None:
+        decompressor = zlib.decompressobj(31)
+        shim_and_fd = decompressor.decompress(kernel, 4 * 2**20)
+        trees = decompressor.unused_data
+        fd_bytes = replacement_fd.read_bytes()
+        fd_size = 3 * 2**20
+        shim_size = len(shim_and_fd) - fd_size
+        if (not decompressor.eof or not 64 <= shim_size <= 4096
+                or shim_and_fd[56:60] != b'ARMd'
+                or struct.unpack_from('<Q', shim_and_fd, 16)[0] != len(shim_and_fd)
+                or not trees.startswith(bytes.fromhex('d00dfeed'))
+                or len(fd_bytes) != fd_size
+                or shim_and_fd[shim_size + 40:shim_size + 44] != b'_FVH'
+                or fd_bytes[40:44] != b'_FVH'):
+            raise ValueError('The replacement firmware does not fit the verified sheng boot transport')
+        kernel = gzip.compress(shim_and_fd[:shim_size] + fd_bytes, mtime=0) + trees
+        kernel_sha = hashlib.sha256(kernel).hexdigest()
     ramdisk = payload.read_bytes()
     header = bytearray(transport[:page])
+    struct.pack_into('<I', header, 8, len(kernel))
     struct.pack_into('<I', header, 16, len(ramdisk))
     boot_id = hashlib.sha1()
     for data in (kernel, ramdisk, b''):
@@ -124,7 +169,8 @@ def build_boot(args, ctx, common, container, runtime, work):
     if receipt['fixture'] or receipt['profile'] != ctx.work.parent.name:
         raise ValueError('Expected a populated APFS container for the selected macOS profile')
     os.environ['UNIXNU_APFS_CONTAINER'] = str(receipt_path)
-    stages = ('kernel', 'payload') if args.boot_template else ('kernel', 'package', 'firmware', 'payload')
+    reuse_firmware = args.boot_template and not args.rebuild_boot_firmware
+    stages = ('kernel', 'payload') if reuse_firmware else ('kernel', 'package', 'firmware', 'payload')
     unixnu('build', *stages, *common, '--runtime-dir', str(runtime))
     payload = ctx.work / 'payload/payload.img'
     record = json.loads(payload.with_suffix('.json').read_text())
@@ -138,7 +184,9 @@ def build_boot(args, ctx, common, container, runtime, work):
         stage = Path(temporary)
         boot = stage / 'boot.img'
         if args.boot_template:
-            kernel_sha = template_boot(args.boot_template, payload, boot)
+            replacement_fd = (firmware.fd_path(ctx, cli.need_uefi(ctx), ctx.args.target)
+                              if args.rebuild_boot_firmware else None)
+            kernel_sha = template_boot(args.boot_template, payload, boot, replacement_fd)
         else:
             unixnu('bootimg', *common, '--ramdisk', str(payload), '--output', str(boot))
             kernel_sha = json.loads((stage / 'boot.json').read_text())['kernel_sha256']
@@ -149,11 +197,13 @@ def build_boot(args, ctx, common, container, runtime, work):
         record = {**record, 'boot_bytes': boot.stat().st_size, 'boot_sha256': sha256_file(boot),
                   'transport_kernel_sha256': kernel_sha,
                   'hardware_tested': False}
+        if args.rebuild_boot_firmware:
+            record['transport_fd_sha256'] = sha256_file(replacement_fd)
         (stage / 'boot.json').write_text(json.dumps(record, indent=2) + '\n')
         for name in ('boot.img', 'payload.img', 'payload.json', 'boot.json'):
             (stage / name).replace(destination / name)
     geometry = ctx.board['userdata']
-    return (geometry['last_lba'] - geometry['first_lba'] + 1) * geometry['lba_bytes']
+    return receipt.get('partition_bytes', (geometry['last_lba'] - geometry['first_lba'] + 1) * geometry['lba_bytes'])
 
 
 def prepare(args, work, container):
@@ -168,6 +218,7 @@ def prepare(args, work, container):
     ctx = Context(cli.parser().parse_args(['tree', *common]))
     if ctx.name != 'sheng' or ctx.board['payload']['runtime']['target'] != 'macos27':
         raise Error('Expected the sheng macOS profile')
+    boot_payload.kernel_command_line(ctx, native_apfs=True)
     cli.need_uefi(ctx)
     chip_id = ctx.option_text('unique_chip_id', 'UNIXNU_UNIQUE_CHIP_ID')
     if not chip_id:
@@ -175,6 +226,12 @@ def prepare(args, work, container):
     if not ctx.config_path.is_file():
         unixnu('defconfig', ctx.config_name, *common)
     modules = cli.prepare(ctx)
+    configured = ctx.board['userdata']
+    if args.userdata_bytes is None:
+        args.userdata_bytes = (configured['last_lba'] - configured['first_lba'] + 1) * configured['lba_bytes']
+    target = usable_bytes(args.userdata_bytes)
+    if args.size_gib * 2**30 > target and not container.exists():
+        raise Error('Initial container exceeds the selected userdata capacity')
     source = Ipsw(ctx) if not container.exists() or not args.runtime_dir else None
     step('2/4 - Create and verify the APFS container')
     build_container(args, ctx, source, container)
@@ -191,12 +248,13 @@ def prepare(args, work, container):
             python(HERE / 'provision-data.py', container, personal, '--user', args.user,
                    '--display-name', args.display_name or args.user, *auto, privileged=True)
         container = personal
+    container = expand_container(args, container, work)
     step('3/4 - Build the runtime, kernel, payload and boot image')
     runtime = args.runtime_dir or ctx.work / 'runtime-native-apfs'
     if not args.runtime_dir:
         prepare_runtime(ctx, source, runtime, modules)
     partition = build_boot(args, ctx, common, container, runtime, work)
-    state = {'container': os.path.relpath(container, work), 'partition_bytes': partition}
+    state = {'container': os.path.relpath(container, work), 'partition_bytes': partition, 'layout': 'combined-apfs', 'growth': 'offline'}
     (work / 'build.json').write_text(json.dumps(state, indent=2) + '\n')
 
 
@@ -236,10 +294,13 @@ def main():
     parser.add_argument('--uefi', type=Path, help='uefi-sheng source checkout')
     parser.add_argument('--ipsw', help='local IPSW path or URL (default: the pinned macOS profile IPSW)')
     parser.add_argument('--container', type=Path, help='reuse an existing container and its exact receipt')
-    parser.add_argument('--size-gib', type=int, default=48, help='initial APFS container size in GiB (default: 48; grows on device)')
+    parser.add_argument('--userdata-bytes', type=int, help='exact target userdata capacity (default: device GPT configuration)')
+    parser.add_argument('--size-gib', type=int, default=48, help='initial APFS container size in GiB (default: 48; grows offline before packaging)')
     parser.add_argument('--rsync', help='rsync 3 executable for creating the container')
     parser.add_argument('--runtime-dir', type=Path, help='reuse a complete runtime report and its matched addon/trust bundle')
     parser.add_argument('--boot-template', type=Path, help='reuse the verified sheng transport from a boot.img and boot.json directory')
+    parser.add_argument('--rebuild-boot-firmware', action='store_true',
+                        help='replace the UEFI volume in a verified boot template with the freshly built volume')
     parser.add_argument('--kernel-arg', action='append', help='extra kernel boot argument (repeatable)')
     parser.add_argument('--user', help='provision a local administrator and skip Setup Assistant')
     parser.add_argument('--display-name', help='display name of the local administrator')
@@ -247,6 +308,8 @@ def main():
     parser.add_argument('--raw-only', action='store_true', help='omit the Android sparse image')
     parser.add_argument('work', type=Path, help='private workspace for the images and build state')
     args = parser.parse_args()
+    if args.rebuild_boot_firmware and (not args.boot_template or args.pack_only or args.use_mkosi):
+        parser.error('--rebuild-boot-firmware requires --boot-template during image preparation')
     if args.use_mkosi and not sys.platform.startswith('linux'):
         parser.error('--use-mkosi runs the packaging step on Linux')
     if not (args.pack_only or args.use_mkosi) and sys.platform != 'darwin':

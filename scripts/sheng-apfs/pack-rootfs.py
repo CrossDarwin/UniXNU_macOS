@@ -23,6 +23,9 @@ def pack(input_dir, output, partition_bytes, raw_only, link_raw, tools, *, nativ
     manifest = json.loads((input_dir / 'container.json').read_text())
     if manifest['format'] != 'sheng-apfs-v1':
         raise ValueError('Unexpected container manifest format')
+    if manifest.get('growth') == 'offline' and (
+            manifest.get('partition_bytes') != partition_bytes or manifest['bytes'] != partition_bytes - 2**30):
+        raise ValueError('Offline container and target userdata geometry differ')
     if native and sys.platform == 'darwin' and not manifest.get('fixture', False):
         spec = importlib.util.spec_from_file_location('container', Path(__file__).with_name('make-container.py'))
         container = importlib.util.module_from_spec(spec)
@@ -43,14 +46,17 @@ def pack(input_dir, output, partition_bytes, raw_only, link_raw, tools, *, nativ
             raise ValueError('Container and 1 GiB diagnostic reserve do not fit the target partition')
         required = 0
         if not raw_only:
-            required += size + (size // 4096) * 12 + 28
+            # Empty APFS capacity is sparse. Encoding it must not require that
+            # capacity as free host space; a failed write preserves the inputs.
+            allocated = min(size, info.st_blocks * 512)
+            required += allocated + (size // 4096) * 12 + 28
         if not link_raw and not (native and sys.platform == 'darwin'):
             required += size
         if required:
             required += 256 * 2**20
             free = shutil.disk_usage(output).free
             print(f'Packaging space - available {free / 2**30:.2f} GiB'
-                  f' - required up to {required / 2**30:.2f} GiB', flush=True)
+                  f' - estimated {required / 2**30:.2f} GiB', flush=True)
             if free < required:
                 raise ValueError('Insufficient packaging space; preserve the container and boot images,'
                                  ' free space and resume with build-images.py --pack-only WORK')

@@ -39,6 +39,19 @@ def check_args(arguments):
     return line
 
 
+def kernel_command_line(ctx, *, native_apfs):
+    extra = list(getattr(ctx.args, 'kernel_arg', None) or [])
+    # Explicit arguments replace board defaults with the same name.
+    names = {item.split('=', 1)[0] for item in extra}
+    defaults = ctx.board.get('payload', {}).get('kernel_args', [])
+    arguments = extra + [item for item in defaults if item.split('=', 1)[0] not in names]
+    if native_apfs:
+        legacy = {'data-persist', 'apfs-boot-shim', 'native-apfs-root'}
+        arguments = ['native-apfs-root=1'] + [
+            item for item in arguments if item.split('=', 1)[0] not in legacy]
+    return check_args(arguments)
+
+
 def check_data_input(ctx, data):
     """An owner-Data kernel needs a seed even when it resumes a persistent overlay."""
     if data:
@@ -112,19 +125,12 @@ def build(ctx, kernel=None):
     if not kernel.is_file():
         raise Error(f'kernel not found: {kernel}; run "unixnu build kernel" or pass --kernel FILE')
     board = ctx.board
-    extra = list(getattr(args, 'kernel_arg', None) or [])
-    # An extra NAME=VALUE replaces the board's argument of the same name. The extra arguments come first: a run's own switches
-    # (autoreset above all, which brings an unattended run back to fastboot) are the last to go if the line is ever cut short.
-    names = {item.split('=', 1)[0] for item in extra}
-    arguments = extra + [item for item in spec.get('kernel_args', []) if item.split('=', 1)[0] not in names]
     native = apfs_root.selected(ctx)
+    line = kernel_command_line(ctx, native_apfs=bool(native))
     if native:
         receipt, fingerprint = native
         if (apfs_root.marker(fingerprint).encode() + b'\0') not in kernel.read_bytes():
             raise Error('Kernel was built for a different native APFS receipt')
-        legacy = {'data-persist', 'apfs-boot-shim', 'native-apfs-root'}
-        arguments = ['native-apfs-root=1'] + [
-            item for item in arguments if item.split('=', 1)[0] not in legacy]
         spec = {**spec, 'title': 'SHENG - Native APFS', 'timeout': -1,
                 'adt': {**spec.get('adt', {}), 'root_match_volume_uuid': receipt['system_uuid']}}
         platform = ctx.board.get('adt', {})
@@ -134,8 +140,8 @@ def build(ctx, kernel=None):
                       'boot-uuid': receipt['system_uuid'], 'apfs-preboot-uuid': receipt['system_uuid']}
         board = {**ctx.board, 'payload': spec, 'adt': {**platform, 'chosen': {
             **chosen, 'string': {**chosen.get('string', {}), **identities}}}}
-    line = check_args(arguments)
     log(f'kernel args: {line}')
+    arguments = line.split()
     check_native_root(kernel, arguments, bool(ctx.board.get('adt', {}).get('defaults', {}).get('u32', {}).get('vmm-present')))
     owner_trust = getattr(args, 'owner_trust_cache', None)
     trust = expand(owner_trust or args.trust_cache) if (owner_trust or getattr(args, 'trust_cache', None)) else None

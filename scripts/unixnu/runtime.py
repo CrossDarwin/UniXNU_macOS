@@ -33,7 +33,9 @@ def seed_uuid(tree, path):
 
 def prepare(ctx, kernel_build=False):
     from . import apfs_root
-    if apfs_root.selected(ctx):
+    native = apfs_root.selected(ctx)
+    if native:
+        offline = native[0].get('growth') == 'offline'
         args = ctx.args
         if getattr(args, 'data_ramdisk', None) or getattr(args, 'init_data', False) or getattr(args, 'skip_setup', False):
             raise Error('Native APFS Data is prepared by make-container.py')
@@ -46,14 +48,14 @@ def prepare(ctx, kernel_build=False):
             inputs = {'owner_trust_cache': owner, 'gpu_addon': addon}
             # A runtime directory contains intermediate addons as well as its final output.
             report = Path(addon).expanduser().resolve().parent / 'generated.json'
-            if report.is_file() and native_runtime_inputs(report, diagnostics=bool(
+            if report.is_file() and native_runtime_inputs(report, offline=offline, diagnostics=bool(
                     ctx.board.get('payload', {}).get('runtime', {}).get('desktop_diagnostics'))) != {
                 key: Path(path).expanduser().resolve() for key, path in inputs.items()
             }:
                 raise Error(f'Use the completed addon and trust pair from {report}')
         else:
             report = (Path(directory).expanduser() if directory else ctx.work / 'runtime') / 'generated.json'
-            inputs = native_runtime_inputs(report, diagnostics=bool(
+            inputs = native_runtime_inputs(report, offline=offline, diagnostics=bool(
                 ctx.board.get('payload', {}).get('runtime', {}).get('desktop_diagnostics')))
         for name, value in inputs.items():
             path = Path(value).expanduser().resolve()
@@ -162,12 +164,16 @@ def prepare(ctx, kernel_build=False):
     ctx._runtime_prepared = True
 
 
-def native_runtime_inputs(report, *, diagnostics=False):
+def native_runtime_inputs(report, *, diagnostics=False, offline=False):
     try:
         generated = json.loads(report.read_text())
-        if generated.get('native_apfs_grow') != {'version': 2, 'log_reserve_bytes': 1 << 30}:
+        if offline:
+            if (generated.get('native_apfs_offline') != {'version': 1, 'log_reserve_bytes': 1 << 30}
+                    or generated.get('native_apfs_grow')):
+                raise Error('Native APFS runtime lacks offline layout qualification; regenerate the runtime')
+        elif generated.get('native_apfs_grow') != {'version': 3, 'log_reserve_bytes': 1 << 30}:
             raise Error('Native APFS runtime lacks automatic growth; regenerate the runtime before building')
-        if diagnostics and generated.get('desktop_diagnostics') != {'version': 3, 'interval_seconds': 5}:
+        if diagnostics and generated.get('desktop_diagnostics') != {'version': 4, 'interval_seconds': 5}:
             raise Error('Native APFS runtime lacks continuous diagnostics; regenerate the runtime before building')
         return {'owner_trust_cache': Path(generated['trust_cache']).expanduser().resolve(),
                 'gpu_addon': Path(generated['gpu_addon']).expanduser().resolve()}

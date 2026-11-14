@@ -484,26 +484,27 @@ def main():
             for directory in (bins, daemons, agents):
                 directory.mkdir(parents=True)
             shutil.copyfile(ROOT / 'scripts/sheng-apfs/safari.sh', bins / 'Safari.sh')
-            grow = bins / 'ApfsGrow'
-            sdk = subprocess.check_output(['xcrun', '--sdk', 'macosx', '--show-sdk-path'], text=True).strip()
-            run('xcrun', '--sdk', 'macosx', 'clang', '-target', 'arm64e-apple-macos27.0',
-                '-isysroot', sdk, '-O2', '-Wall', '-Wextra', '-Werror',
-                ROOT / 'scripts/sheng-apfs/ApfsGrow.c', '-framework', 'CoreFoundation',
-                '-framework', 'IOKit', '-o', grow)
-            run('codesign', '--force', '--sign', '-', '--pagesize', '4096',
-                '--identifier', 'org.unixnu.apfs-grow', grow)
-            (daemons / 'org.unixnu.apfs-grow.plist').write_bytes(plistlib.dumps(dict(
-                Label='org.unixnu.apfs-grow', RunAtLoad=True, ProcessType='Background',
-                ProgramArguments=['/private/var/ngpu/bin/ApfsGrow'],
-                StandardOutPath='/var/log/unixnu-apfs-grow.log',
-                StandardErrorPath='/var/log/unixnu-apfs-grow.log')))
+            if not request.get('native_apfs_offline'):
+                grow = bins / 'ApfsGrow'
+                sdk = subprocess.check_output(['xcrun', '--sdk', 'macosx', '--show-sdk-path'], text=True).strip()
+                run('xcrun', '--sdk', 'macosx', 'clang', '-target', 'arm64e-apple-macos27.0',
+                    '-isysroot', sdk, '-O2', '-Wall', '-Wextra', '-Werror',
+                    ROOT / 'scripts/sheng-apfs/ApfsGrow.c', '-framework', 'CoreFoundation',
+                    '-framework', 'IOKit', '-o', grow)
+                run('codesign', '--force', '--sign', '-', '--pagesize', '4096',
+                    '--identifier', 'org.unixnu.apfs-grow', grow)
+                (daemons / 'org.unixnu.apfs-grow.plist').write_bytes(plistlib.dumps(dict(
+                    Label='org.unixnu.apfs-grow', RunAtLoad=True, ProcessType='Standard',
+                    ProgramArguments=['/private/var/ngpu/bin/ApfsGrow'],
+                    StandardOutPath='/var/log/unixnu-apfs-grow.log',
+                    StandardErrorPath='/var/log/unixnu-apfs-grow.log')))
             for action, jobs, extra in (('repair', daemons, {
                     'StandardOutPath': '/var/log/unixnu-safari-repair.log',
                     'StandardErrorPath': '/var/log/unixnu-safari-repair.log'}),
                                          ('register', agents, {'LimitLoadToSessionType': 'Aqua'})):
                 label = f'org.unixnu.safari-{action}'
                 (jobs / f'{label}.plist').write_bytes(plistlib.dumps(dict(
-                    Label=label, RunAtLoad=True, ProcessType='Background',
+                    Label=label, RunAtLoad=True, ProcessType='Standard' if action == 'repair' else 'Background',
                     KeepAlive={'SuccessfulExit': False}, ThrottleInterval=30,
                     ProgramArguments=['/bin/bash', '/private/var/ngpu/bin/Safari.sh', action], **extra)))
             candidate = work / 'safari-addon.bin'
@@ -513,6 +514,33 @@ def main():
             script('addon-add-dir.py', addon, candidate, 'bin', bins,
                    'Library/LaunchDaemons', daemons, 'Library/LaunchAgents', agents)
             addon = out / 'safari-addon.bin'
+            candidate.replace(addon)
+        test_scripts = os.environ.get('UNIXNU_MACOS_TEST')
+        if request.get('target') == 'macos27' and addon is not None and test_scripts:
+            # Unattended testing only (never set for a release): UNIXNU_MACOS_TEST names a directory with daemon.sh (run as root at
+            # boot) and/or agent.sh (run in the user's session after login). They go to /private/var/ngpu/test with a launchd job
+            # each, and write to /Users/Shared/unixnu-test, which the log reader mirrors afterwards.
+            source = Path(test_scripts)
+            staged, jobs_d, jobs_a = work / 'test', work / 'test-daemons', work / 'test-agents'
+            for directory in (staged, jobs_d, jobs_a):
+                directory.mkdir()
+            helpers = source / 'bin'
+            if helpers.is_dir():
+                shutil.copytree(helpers, staged / 'bin')
+            for name, jobs, extra in (('daemon', jobs_d, {}), ('agent', jobs_a, {'LimitLoadToSessionType': 'Aqua'})):
+                script_file = source / (name + '.sh')
+                if not script_file.is_file():
+                    continue
+                (staged / (name + '.sh')).write_bytes(script_file.read_bytes())
+                command = (f'/bin/mkdir -p /Users/Shared/unixnu-test; exec /bin/sh /private/var/ngpu/test/{name}.sh '
+                           f'>> /Users/Shared/unixnu-test/{name}.log 2>&1')
+                (jobs / f'org.unixnu.test.{name}.plist').write_bytes(plistlib.dumps(dict(
+                    Label=f'org.unixnu.test.{name}', RunAtLoad=True, ProcessType='Standard', ProgramArguments=['/bin/sh', '-c', command], **extra),
+                    fmt=plistlib.FMT_XML))
+            candidate = work / 'test-addon.bin'
+            script('addon-add-dir.py', addon, candidate, 'test', staged, 'Library/LaunchDaemons', jobs_d,
+                   'Library/LaunchAgents', jobs_a)
+            addon = out / 'test-addon.bin'
             candidate.replace(addon)
         if request.get('target') == 'macos27' and addon is not None and (
                 request.get('native_apfs') or request.get('desktop_diagnostics')):
@@ -526,34 +554,10 @@ def main():
                     cache_report = merge_launchd_cache(mount / 'System/Library/xpc/launchd.plist', daemons, cache)
             cache_report.update(sign_launchd_cache(cache))
             candidate = work / 'owner-bootstrap-addon.bin'
-            script('addon-add-dir.py', addon, candidate, 'xpc', cache.parent)
+            script('addon-add-dir.py', addon, candidate, 'xpc', cache.parent, 'launchd', daemons)
             addon = out / 'owner-bootstrap-addon.bin'
             candidate.replace(addon)
             (out / 'owner-bootstrap.json').write_text(json.dumps(cache_report, indent=2) + '\n')
-        test_scripts = os.environ.get('UNIXNU_MACOS_TEST')
-        if request.get('target') == 'macos27' and addon is not None and test_scripts:
-            # Unattended testing only (never set for a release): UNIXNU_MACOS_TEST names a directory with daemon.sh (run as root at
-            # boot) and/or agent.sh (run in the user's session after login). They go to /private/var/ngpu/test with a launchd job
-            # each, and write to /Users/Shared/unixnu-test, which the log reader mirrors afterwards.
-            source = Path(test_scripts)
-            staged, jobs_d, jobs_a = work / 'test', work / 'test-daemons', work / 'test-agents'
-            for directory in (staged, jobs_d, jobs_a):
-                directory.mkdir()
-            for name, jobs, extra in (('daemon', jobs_d, {}), ('agent', jobs_a, {'LimitLoadToSessionType': 'Aqua'})):
-                script_file = source / (name + '.sh')
-                if not script_file.is_file():
-                    continue
-                (staged / (name + '.sh')).write_bytes(script_file.read_bytes())
-                command = (f'/bin/mkdir -p /Users/Shared/unixnu-test; exec /bin/sh /private/var/ngpu/test/{name}.sh '
-                           f'>> /Users/Shared/unixnu-test/{name}.log 2>&1')
-                (jobs / f'org.unixnu.test.{name}.plist').write_bytes(plistlib.dumps(dict(
-                    Label=f'org.unixnu.test.{name}', RunAtLoad=True, ProgramArguments=['/bin/sh', '-c', command], **extra),
-                    fmt=plistlib.FMT_XML))
-            candidate = work / 'test-addon.bin'
-            script('addon-add-dir.py', addon, candidate, 'test', staged, 'Library/LaunchDaemons', jobs_d,
-                   'Library/LaunchAgents', jobs_a)
-            addon = out / 'test-addon.bin'
-            candidate.replace(addon)
         if trust is not None and (request.get('wifi_tool') or bluetooth_report is not None or appsync_report is not None
                                   or absent_report is not None or request.get('native_apfs')
                                   or request.get('desktop_diagnostics')):
@@ -594,9 +598,11 @@ def main():
         (out / 'generated.json').write_text(json.dumps(dict(data_ramdisk=str(seed) if seed else None,
                                                           gpu_addon=str(addon) if addon else None,
                                                           trust_cache=str(trust),
-                                                          **({'native_apfs_grow': {'version': 2, 'log_reserve_bytes': 1 << 30}}
+                                                          **({'native_apfs_offline': {'version': 1, 'log_reserve_bytes': 1 << 30}}
+                                                             if request.get('native_apfs_offline') else
+                                                             {'native_apfs_grow': {'version': 3, 'log_reserve_bytes': 1 << 30}}
                                                              if request.get('native_apfs') else {}),
-                                                          **({'desktop_diagnostics': {'version': 3, 'interval_seconds': 5}}
+                                                          **({'desktop_diagnostics': {'version': 4, 'interval_seconds': 5}}
                                                              if request.get('desktop_diagnostics') else {})), indent=2) + '\n')
 
 

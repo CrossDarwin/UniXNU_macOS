@@ -27,6 +27,18 @@ def seed(path):
 
 
 class RuntimeInputs(unittest.TestCase):
+    def test_offline_runtime_rejects_resize_daemon(self):
+        with tempfile.TemporaryDirectory() as td:
+            report = Path(td) / 'generated.json'
+            metadata = dict(trust_cache=str(Path(td) / 'trust'), gpu_addon=str(Path(td) / 'addon'),
+                            native_apfs_offline=dict(version=1, log_reserve_bytes=1 << 30))
+            report.write_text(json.dumps(metadata))
+            self.assertEqual(runtime.native_runtime_inputs(report, offline=True)['gpu_addon'], Path(td) / 'addon')
+            metadata['native_apfs_grow'] = dict(version=3, log_reserve_bytes=1 << 30)
+            report.write_text(json.dumps(metadata))
+            with self.assertRaisesRegex(Error, 'offline layout'):
+                runtime.native_runtime_inputs(report, offline=True)
+
     def test_native_runtime_requires_grow_helper_qualification(self):
         with tempfile.TemporaryDirectory() as td:
             report = Path(td) / 'generated.json'
@@ -34,13 +46,13 @@ class RuntimeInputs(unittest.TestCase):
             report.write_text(json.dumps(metadata))
             with self.assertRaisesRegex(Error, 'regenerate the runtime'):
                 runtime.native_runtime_inputs(report)
-            metadata['native_apfs_grow'] = dict(version=2, log_reserve_bytes=1 << 30)
+            metadata['native_apfs_grow'] = dict(version=3, log_reserve_bytes=1 << 30)
             report.write_text(json.dumps(metadata))
             self.assertEqual(runtime.native_runtime_inputs(report), {
                 'owner_trust_cache': Path(metadata['trust_cache']), 'gpu_addon': Path(metadata['gpu_addon'])})
             with self.assertRaisesRegex(Error, 'continuous diagnostics'):
                 runtime.native_runtime_inputs(report, diagnostics=True)
-            metadata['desktop_diagnostics'] = dict(version=3, interval_seconds=5)
+            metadata['desktop_diagnostics'] = dict(version=4, interval_seconds=5)
             report.write_text(json.dumps(metadata))
             self.assertEqual(runtime.native_runtime_inputs(report, diagnostics=True)['gpu_addon'], Path(metadata['gpu_addon']))
 

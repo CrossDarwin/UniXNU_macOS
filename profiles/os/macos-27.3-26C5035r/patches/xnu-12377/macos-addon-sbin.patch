@@ -6,14 +6,15 @@ is bound read-only over /usr/sbin or /usr/lib as a union: the system's own launc
 paths, the daemons load the library from a place their sandbox lets them map code from, and every other name still comes from
 the system volume. sheng uses it for the Bluetooth daemon, BlueTool and the capability library; iPadOS has the same arrangement in
 the board's runtime patch. Trust stays with the owner trust bundle.
-The signed xpc/launchd.plist overlay registers owner root services before the Aqua session.
+The signed xpc/launchd.plist cache and its owner job files are bound read-only before launchd starts.
+launchd enumerates the job directory even when the definitions are present in its cache.
 Requires macos-owner-data-firmlinks.patch.
 
 diff --git a/bsd/kern/kern_exec.c b/bsd/kern/kern_exec.c
 index 06b8985..af3fdca 100644
 --- a/bsd/kern/kern_exec.c
 +++ b/bsd/kern/kern_exec.c
-@@ -9441,11 +9441,48 @@ done:
+@@ -9441,11 +9441,49 @@ done:
  }
  #endif
  
@@ -39,7 +40,8 @@ index 06b8985..af3fdca 100644
 +	static const char *const binds[][2] = {
 +		{"/private/var/ngpu/lib", "/usr/lib"},
 +		{"/private/var/ngpu/sbin", "/usr/sbin"},
-+		{"/private/var/ngpu/xpc", "/System/Library/xpc"}
++		{"/private/var/ngpu/xpc", "/System/Library/xpc"},
++		{"/private/var/ngpu/launchd", "/System/Library/LaunchDaemons"}
 +	};
 +	int status = 0;
 +	for (size_t i = 0; i < sizeof(binds) / sizeof(binds[0]); ++i) {
@@ -62,7 +64,7 @@ index 06b8985..af3fdca 100644
  static void
  native_owner_macos_gpu_addon(proc_t p, user_addr_t scratch)
  {
-@@ -9565,6 +9602,7 @@ native_owner_macos_data_prepare(proc_t p, user_addr_t scratch)
+@@ -9565,6 +9603,7 @@ native_owner_macos_data_prepare(proc_t p, user_addr_t scratch)
  	if (!error) native_owner_macos_app_cryptex(p, scratch);
  #endif
  	if (!error) native_owner_macos_gpu_addon(p, scratch);
