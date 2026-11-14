@@ -68,7 +68,7 @@ class SeedWorkdirTest(unittest.TestCase):
                 handle.seek(40)
                 handle.write((raw.stat().st_size // 4096).to_bytes(8, 'little'))
 
-        listing = plistlib.dumps({'Containers': [{'ContainerReference': 'disk100',
+        listing = plistlib.dumps({'Containers': [{'ContainerReference': 'disk100', 'APFSContainerUUID': '00000000-0000-0000-0000-000000000000',
                                  'PhysicalStores': [{'DeviceIdentifier': 'disk99'}]}]})
         detach = Mock(return_value=subprocess.CompletedProcess([], 0))
         if failure == 'detach':
