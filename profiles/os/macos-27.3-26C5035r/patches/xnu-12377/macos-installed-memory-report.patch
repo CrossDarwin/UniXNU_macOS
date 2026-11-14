@@ -1,0 +1,33 @@
+Report the verified installed capacity without changing VM allocation limits.
+
+--- a/bsd/kern/kern_mib.c
++++ b/bsd/kern/kern_mib.c
+@@ -990,7 +990,28 @@
+  * physical memory size, whereas on non-macOS it is the memory size minus any carveouts.
+  */
+ #if XNU_TARGET_OS_OSX
++#if defined(__arm64__)
++static int
++sysctl_hw_installed_memory SYSCTL_HANDLER_ARGS
++{
++	uint32_t installed_gib = 0;
++	uint32_t memory_limit;
++	uint64_t bytes = max_mem_actual;
++
++	/* A board test profile can report the installed DRAM independently of VM ownership. */
++	if (!PE_parse_boot_argn("maxmem", &memory_limit, sizeof(memory_limit)) &&
++	    PE_parse_boot_argn("installed-ram-gib", &installed_gib, sizeof(installed_gib)) &&
++	    installed_gib == 8 && bytes <= ((uint64_t)installed_gib << 30)) {
++		bytes = (uint64_t)installed_gib << 30;
++	}
++	return sysctl_io_number(req, bytes, sizeof(bytes), NULL, NULL);
++}
++
++SYSCTL_PROC(_hw, HW_MEMSIZE, memsize, CTLTYPE_QUAD | CTLFLAG_RD | CTLFLAG_KERN | CTLFLAG_LOCKED,
++    0, 0, sysctl_hw_installed_memory, "Q", "");
++#else
+ SYSCTL_QUAD(_hw, HW_MEMSIZE, memsize, CTLFLAG_RD | CTLFLAG_KERN | CTLFLAG_LOCKED, &max_mem_actual, "");
++#endif
+ SYSCTL_QUAD(_hw, OID_AUTO, memsize_usable, CTLFLAG_RD | CTLFLAG_KERN | CTLFLAG_LOCKED, &max_mem, "");
+ #else
+ SYSCTL_QUAD(_hw, HW_MEMSIZE, memsize, CTLFLAG_RD | CTLFLAG_KERN | CTLFLAG_LOCKED, &max_mem, "");

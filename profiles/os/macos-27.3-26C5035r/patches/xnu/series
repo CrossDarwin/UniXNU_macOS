@@ -58,5 +58,6 @@ arch:../../../patches/xnu-12377/darwin26-shared-region.patch
 macos-native-apfs.patch
 macos-native-apfs-vm.patch
 ../xnu-12377/macos-callout-probe.patch
+../xnu-12377/macos-installed-memory-report.patch
 ../xnu-12377/macos-swapin-io-priority.patch
 ../xnu-12377/macos-4k-zone-va-budget.patch

@@ -1,21 +1,41 @@
 """Native-only kernel staging must not fetch or prelink the original kernelcache."""
 import hashlib
 import json
+import os
 from pathlib import Path
 import struct
 import sys
 import tempfile
-from types import SimpleNamespace
+from types import MethodType, SimpleNamespace
 import unittest
 from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from unixnu import kernel
 from unixnu.cli import parser
+from unixnu.config import Context
 from unixnu.util import Error
 
 
 class NativeKernelTests(unittest.TestCase):
+    def test_archive_subprocess_receives_selected_uefi_checkout(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / 'scripts').mkdir()
+            (root / 'scripts/probe.py').write_text('')
+            for explicit in (True, False):
+                with self.subTest(explicit=explicit), patch.dict(os.environ, {'UNIXNU_UEFI': str(root / 'inherited-uefi')}):
+                    args = parser().parse_args(['build', 'kernel', *(['--uefi', str(root / 'selected-uefi')] if explicit else [])])
+                    ctx = SimpleNamespace(tree=root, device=root, logs=root, args=args, modules={},
+                                          need_config=lambda: {'XNU_BUILD_ARCHIVES': True})
+                    ctx.option = MethodType(Context.option, ctx)
+                    with patch.object(kernel, 'archive_plan', return_value=[('archive', 'probe.py')]), \
+                         patch.object(kernel, 'toolchain_path', return_value='/usr/bin'), \
+                         patch.object(kernel.components, 'sync_outputs'), patch.object(kernel, 'run') as run:
+                        kernel.build_archives(ctx, {'PATH': '/usr/bin', 'UNIXNU_UEFI': str(root / 'stale-uefi')})
+                    expected = root / ('selected-uefi' if explicit else 'inherited-uefi')
+                    self.assertEqual(run.call_args.kwargs['env']['UNIXNU_UEFI'], str(expected.resolve()))
+
     def test_prelink_failure_preserves_previous_output_and_keeps_diagnostics(self):
         self.check_prelink_publication(fail=True)
 

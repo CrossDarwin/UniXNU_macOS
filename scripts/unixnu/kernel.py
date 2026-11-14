@@ -149,6 +149,9 @@ def build_archives(ctx, env):
     if not ctx.need_config().get('XNU_BUILD_ARCHIVES'):
         return
     env = dict(env, PATH=toolchain_path(env.get('PATH')), UNIXNU_DEVICE=str(ctx.device))
+    uefi = ctx.option('uefi', 'UNIXNU_UEFI')
+    if uefi:
+        env['UNIXNU_UEFI'] = str(uefi)
     for index, (kind, entry) in enumerate(archive_plan(ctx), 1):
         if kind == 'component':
             spec = entry
