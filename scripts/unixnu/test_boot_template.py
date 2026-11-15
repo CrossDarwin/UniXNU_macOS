@@ -50,8 +50,8 @@ def fv(files, size=None):
     return bytes(data)
 
 
-def firmware(pe=b'MZold'):
-    inner = fv([file(LOADER, section(0x10, pe)), file(OTHER, section(0x10, b'MZuntouched'))])
+def firmware(pe=b'MZold', driver=b'MZuntouched', driver_kind=7):
+    inner = fv([file(LOADER, section(0x10, pe)), file(OTHER, section(0x10, driver), kind=driver_kind)])
     expanded = section(0x19, b'') + section(0x17, inner)
     compressed = lzma.compress(expanded, format=lzma.FORMAT_ALONE)
     guided = template.LZMA_GUID + struct.pack('<HH', 24, 1) + compressed
@@ -70,6 +70,45 @@ def boot_image(fd, ramdisk=b'payload'):
 
 
 class BootTemplate(unittest.TestCase):
+    def test_selected_driver_replaces_pe_and_dependency_with_sec_unchanged(self):
+        old = firmware()
+        driver = file(OTHER, section(0x13, b'new dependency!!') + section(0x10, b'MZmemory'))
+        source = fv([file(OTHER, section(0x12, b'qualified SEC'), kind=3),
+                     template.fv_files(old)[2][0][2]], size=65536)
+        updated, report = template.replace_loader(source, b'MZloader', LOADER, {OTHER: driver})
+        self.assertEqual(template.fv_files(updated)[2][0][2], template.fv_files(source)[2][0][2])
+        selected = template.fv_files(template.compressed_volume(updated)[4], 8)[2][1][2]
+        self.assertEqual(selected, driver)
+        self.assertEqual(report['preserved_modules'], 0)
+        self.assertEqual(report['updated_drivers'][0]['guid'], OTHER)
+
+    def test_driver_selection_rejects_sec_and_missing_or_duplicate_guids(self):
+        invalid = file(OTHER, section(0x10, b'MZsec'), kind=3)
+        with self.assertRaisesRegex(Error, 'DXE driver'):
+            template.replace_loader(firmware(), b'MZnew', LOADER, {OTHER: invalid})
+        missing = '00000000-0000-0000-0000-000000000000'
+        with self.assertRaisesRegex(Error, 'exactly one'):
+            template.replace_loader(firmware(), b'MZnew', LOADER,
+                                    {missing: file(missing, section(0x10, b'MZnew'))})
+        with self.assertRaisesRegex(Error, 'DXE driver'):
+            template.replace_loader(firmware(driver_kind=3), b'MZnew', LOADER,
+                                    {OTHER: file(OTHER, section(0x10, b'MZnew'))})
+
+    def test_preparation_updates_only_explicit_drivers(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / 'template.xz'
+            path.write_bytes(lzma.compress(boot_image(firmware())))
+            spec = {'sha256': hashlib.sha256(path.read_bytes()).hexdigest(),
+                    'loader_guid': LOADER, 'driver_guids': [OTHER]}
+            with patch.dict('os.environ', UNIXNU_BOOT_TEMPLATE=str(path)):
+                _, fd, _, _, report = template.prepare(SimpleNamespace(), spec,
+                                                      firmware(b'MZcurrent', b'MZmemory'))
+                self.assertEqual(template.loader_pe(fd, OTHER), b'MZmemory')
+                for bad in ([OTHER, OTHER], [LOADER], ['not-a-guid'], OTHER):
+                    spec['driver_guids'] = bad
+                    with self.subTest(bad=bad), self.assertRaises(Error):
+                        template.prepare(SimpleNamespace(), spec, firmware(b'MZcurrent'))
+
     def test_template_boot_image_needs_no_external_device_tree(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

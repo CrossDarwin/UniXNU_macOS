@@ -1,4 +1,4 @@
-"""Preserve a qualified firmware transport while updating its DarwinBoot module."""
+"""Preserve a qualified firmware transport while updating selected DXE modules."""
 import hashlib
 import lzma
 import os
@@ -116,12 +116,30 @@ def file_checksum(file):
     file[16] = (-sum(header)) & 255
 
 
-def replace_loader(firmware, pe, identifier):
+def replace_loader(firmware, pe, identifier, drivers=None):
     """Keep unrelated files byte-identical and refuse unsupported FV attributes."""
     if pe[:2] != b'MZ':
         raise Error('replacement loader is not a PE image')
     file_at, outer, section_at, section, expanded = compressed_volume(firmware)
     header, _, original = fv_files(expanded, 8)
+    drivers = drivers or {}
+    if identifier in drivers:
+        raise Error('loader must not also be listed as a replacement driver')
+    for guid, item in drivers.items():
+        if len(item) < 24 or str(uuid.UUID(bytes_le=item[:16])) != guid or item[18] != 7:
+            raise Error('replacement must be a matching DXE driver')
+        if size24(item, 20) != len(item) or item[19] not in (0, 4):
+            raise Error('invalid replacement DXE driver header')
+        check = bytearray(item[:24])
+        check[17] = check[23] = 0
+        if sum(check) & 255:
+            raise Error('replacement DXE driver checksum mismatch')
+        images = [s[4:] for _, kind, s in sections(item, 24, len(item)) if kind == 0x10]
+        if len(images) != 1 or images[0][:2] != b'MZ':
+            raise Error('replacement DXE driver has no PE image')
+        matches = [f for _, name, f in original if name == guid]
+        if len(matches) != 1 or matches[0][18] != 7:
+            raise Error('expected exactly one selected DXE driver in template')
     if section_at != 24 or len(section) + 24 != len(outer):
         raise Error('compressed firmware file contains additional sections')
     rebuilt = bytearray(expanded[:8 + header])
@@ -142,7 +160,7 @@ def replace_loader(firmware, pe, identifier):
             put24(item, 20, len(item))
             file_checksum(item)
             file = bytes(item)
-        rebuilt.extend(file)
+        rebuilt.extend(drivers.get(guid, file))
     if count != 1:
         raise Error('expected exactly one loader PE replacement')
     # The qualified template uses one uniform 4 KiB block map.
@@ -162,8 +180,10 @@ def replace_loader(firmware, pe, identifier):
     if len(changed) != len(original):
         raise Error('firmware module count changed')
     for before, after in zip(original, changed):
-        if before[1] != after[1] or (before[1] != identifier and before[2] != after[2]):
+        if before[1] != after[1] or (before[1] != identifier and before[1] not in drivers and before[2] != after[2]):
             raise Error('an unrelated firmware module changed')
+        if before[1] in drivers and after[2] != drivers[before[1]]:
+            raise Error('replacement DXE driver failed firmware round-trip verification')
     packed = bytearray(lzma.compress(bytes(rebuilt), format=lzma.FORMAT_ALONE,
                                     filters=[{'id': lzma.FILTER_LZMA1, 'dict_size': 1 << 24, 'lc': 3, 'lp': 0, 'pb': 2}]))
     packed[5:13] = len(rebuilt).to_bytes(8, 'little')
@@ -178,8 +198,12 @@ def replace_loader(firmware, pe, identifier):
     result = firmware[:file_at] + file + b'\xff' * (len(firmware) - file_at - len(file))
     if loader_pe(result, identifier) != pe:
         raise Error('replacement loader failed firmware round-trip verification')
+    if fv_files(result)[2][:-1] != root[:-1]:
+        raise Error('a firmware bootstrap module changed')
     return result, {'loader_guid': identifier, 'loader_sha256': hashlib.sha256(pe).hexdigest(),
-                    'loader_bytes': len(pe), 'preserved_modules': len(original) - 1}
+                    'loader_bytes': len(pe), 'preserved_modules': len(original) - 1 - len(drivers),
+                    'updated_drivers': [{'guid': guid, 'sha256': hashlib.sha256(item).hexdigest(),
+                                         'bytes': len(item)} for guid, item in drivers.items()]}
 
 
 def parse_boot_image(data):
@@ -258,6 +282,22 @@ def prepare(ctx, spec, source_firmware):
         raise Error('source and template firmware volumes have different sizes')
     identifier = str(uuid.UUID(spec['loader_guid']))
     pe = loader_pe(source_firmware, identifier)
-    firmware, report = replace_loader(firmware, pe, identifier)
+    selected = spec.get('driver_guids', [])
+    if not isinstance(selected, list) or any(not isinstance(guid, str) for guid in selected):
+        raise Error('boot template driver_guids must be a list of GUIDs')
+    try:
+        guids = [str(uuid.UUID(guid)) for guid in selected]
+    except ValueError as error:
+        raise Error('invalid boot template driver GUID') from error
+    if len(set(guids)) != len(guids) or identifier in guids:
+        raise Error('duplicate boot template replacement GUID')
+    source_files = fv_files(compressed_volume(source_firmware)[4], 8)[2]
+    drivers = {}
+    for guid in guids:
+        matches = [item for _, name, item in source_files if name == guid]
+        if len(matches) != 1:
+            raise Error('expected exactly one selected DXE driver in source firmware')
+        drivers[guid] = matches[0]
+    firmware, report = replace_loader(firmware, pe, identifier, drivers)
     report.update(template_sha256=sha256_file(path), source_fd_sha256=hashlib.sha256(source_firmware).hexdigest())
     return shim, firmware, tree, image, report

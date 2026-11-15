@@ -94,7 +94,7 @@ def build(ctx, uefi, fd, dtb, ramdisk=None, output=None):
         scratch = Path(scratch_name)
         if template:
             shim, firmware, tree, image, compatibility = boot_template.prepare(ctx, template, firmware)
-            log('bootimg: using qualified firmware transport with the current DarwinBoot loader')
+            log('bootimg: using qualified firmware transport with selected current DXE modules')
         else:
             shim = compile_shim(uefi, base, size, requires_header, scratch)
             tree = patch_dtb(Path(dtb).read_bytes(), ctx.board.get('bootimg', {}).get('dtb_node', []), scratch)

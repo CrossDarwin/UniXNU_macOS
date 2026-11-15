@@ -12,6 +12,15 @@ For repeated builds, save paths in [unixnu.local.toml](/reference/configuration#
 4. Build the payload, then follow [boot-image integration](#boot-image-integration). Check `boot/boot.json` and the packaged payload before booting.
 5. On the device, confirm the configured menu entry and DarwinBoot handoff using [verification](#verification). If the entry is absent, work through [payload discovery](#payload-discovery).
 
+## Compatibility templates
+
+A device can retain a qualified boot transport with `[bootimg.template]`.
+The packer updates DarwinBoot using `loader_guid`. List additional DXE driver
+GUIDs in `driver_guids` when a firmware fix must reach that transport. The
+selected drivers include their dependency sections. Unselected modules and
+the SEC bootstrap remain byte-identical. `boot/boot.json` records the updated
+module hashes.
+
 ## Required integration
 
 Build firmware from the UniXNU checkout after selecting the device:
