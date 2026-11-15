@@ -174,6 +174,14 @@ sheng 刷入全新 userdata 后，选择 **Initialize macOS Data and boot**，
 后续开机选择 **Boot**，保留 Data。账户和设置助理配置来自 seed；
 `--skip-setup` 在制作 seed 时传入。
 
+sheng 的 macOS 配置使用固定 SHA-256 的固件模板完成 ABL 封装。
+`unixnu bootimg` 只替换本次固件构建生成的 DarwinBoot，保留已验证的 BootShim、
+设备固件、DTB 和 Android 头参数。payload 为 187 MiB；启动镜像超过 193 MiB 时停止打包。
+菜单等待按键。
+
+模板缓存在 `out/downloads`。离线构建时，将 `UNIXNU_BOOT_TEMPLATE` 指向对应的
+`.img.xz`，仍会核对校验值。`boot/boot.json` 记录模板、加载器和实际固件的哈希。
+
 制作 seed 的参数：
 
 | 参数 | 作用 |
